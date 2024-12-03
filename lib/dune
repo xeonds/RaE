@@ -1,0 +1,10 @@
+(library
+ (name rae_lib)
+ (public_name rae.lib)
+ (preprocess (pps ppx_deriving.show ppx_deriving.eq))
+ (libraries unix str))
+
+(menhir
+ (modules parser))
+
+(ocamllex lexer)
