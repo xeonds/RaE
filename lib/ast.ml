@@ -1,10 +1,10 @@
 open Types
 
-let create_field name data_type offset condition =
-  { name; data_type; offset; condition }
+let create_field name data_type offset condition annotations =
+  { name; data_type; offset; condition; annotations }
 
-let create_block name fields =
-  { name; fields }
+let create_block name fields repeat annotations =
+  { name; fields; repeat; annotations }
 
 let create_metadata endian alignment =
   { endian; alignment }

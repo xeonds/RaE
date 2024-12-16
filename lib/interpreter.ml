@@ -34,7 +34,16 @@ let rec eval_action env = function
   | Echo s -> print_endline s
   | ForIn (_var, _collection, _actions) ->
       (* TODO: Implement iteration *)
-      ()
+          ()
+      | IfElse (cond, then_actions, else_actions) ->
+          begin match eval_expr env cond with
+          | VBool true -> List.iter (eval_action env) then_actions
+          | VBool false -> List.iter (eval_action env) else_actions
+          | _ -> failwith "Condition must evaluate to boolean"
+          end
+      | Let (var, expr) ->
+          let value = eval_expr env expr in
+          eval_action ((var, value) :: env)
   | Write _filename ->
       (* TODO: Implement file writing *)
       ()

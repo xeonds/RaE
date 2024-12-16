@@ -46,30 +46,51 @@ alignment:
   ;
 
 block:
-  | BLOCK n=IDENT LBRACE f=field* RBRACE
-    { create_block n f }
+  | BLOCK n=IDENT LBRACE f=field* r=repeat a=annotations RBRACE
+    { create_block n f r a }
   ;
 
 field:
-  | n=IDENT COLON t=data_type AT o=offset c=condition? SEMICOLON
-    { create_field n t o (match c with Some e -> e | None -> NoCondition) }
+  | n=IDENT COLON t=data_type AT o=expression? c=condition SEMICOLON
+    { create_field n t o (match c with Some e -> e | None -> NoCondition) [] (* TODO: support annotations *) }
   ;
 
 data_type:
   | U8 { UInt8 }
   | U16 { UInt16 }
   | U32 { UInt32 }
-  | STRING LPAREN n=NUM RPAREN { String n }
-  | BLOB LPAREN n=NUM RPAREN { Blob n }
+  | STRING LPAREN e=expression RPAREN { String e }
+  | BLOB LPAREN e=expression RPAREN { Blob e }
+  | IDENT { Custom $1 }
   ;
 
-offset:
-  | n=NUM { n }
-  | n=HEXNUM { n }
+repeat:
+  | FOR LPAREN e=expression RPAREN { Some e }
+  | { None }
   ;
+
+annotations:
+  | AT LBRACE a=annotation_list RBRACE { a }
+  | { [] }
+  ;
+
+annotation_list:
+  | a=annotation SEMICOLON al=annotation_list { a :: al }
+  | { [] }
+  ;
+
+annotation:
+  | k=IDENT COLON v=IDENT { (k, v) }
+  ;
+
+// offset:
+//   | n=NUM { n }
+//   | n=HEXNUM { n }
+//   ;
 
 condition:
-  | DOUBLE_EQUALS e=expression { Equals e }
+  | DOUBLE_EQUALS e=expression { Some (Equals e) }
+  | { None }
   ;
 
 expression:
@@ -82,10 +103,14 @@ expression:
   ;
 
 action:
+  | IF LPAREN e=expression RPAREN LBRACE a=action* RBRACE ELSE LBRACE b=action* RBRACE
+    { IfElse (e, a, b) }
   | IF LPAREN e=expression RPAREN LBRACE a=action* RBRACE
     { If (e, a) }
   | ECHO s=IDENT SEMICOLON
     { Echo s }
   | FOR i=IDENT IN c=IDENT LBRACE a=action* RBRACE
     { ForIn (i, c, a) }
+  | LET i=IDENT EQUALS e=expression SEMICOLON
+    { Let (i, e) }
   ;

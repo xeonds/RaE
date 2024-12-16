@@ -52,10 +52,5 @@ print_usage ()
       parse_and_run script
   | _ ->
       Printf.fprintf stderr "Invalid number of arguments\n";
-      (let () = () in
-        Printf.printf "Usage:\n";
-        Printf.printf "  rae <script.RaE> <binary_file>\n";
-        Printf.printf "  rae \"<scheme or import statement>\" <binary_file>\n";
-        Printf.printf "Or use as a shebang script:\n";
-        Printf.printf "  ./script.rae <binary_file>\n");
+      print_usage ();
       exit 1
