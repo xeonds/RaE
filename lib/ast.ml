@@ -12,5 +12,5 @@ let create_metadata endian alignment =
 let create_file_def name metadata blocks =
   { name; metadata; blocks }
 
-let create_program file_def actions =
-  { file_def; actions }
+let create_program file_defs actions =
+  { file_defs; actions }

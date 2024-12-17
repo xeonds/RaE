@@ -7,14 +7,15 @@ type data_type =
   | String of expression  (* Dynamic length strings *)
   | Blob of expression    (* Dynamic size blobs *)
   | Custom of string      (* A named custom parser *)
+  | Array of data_type * expression  (* Array of a specific data type with a given length *)
   [@@deriving show, eq]
-
 and expression =
   | Int of int
   | Var of string
   | Equal of expression * expression
   | Plus of expression * expression
   | Times of expression * expression
+  | Access of expression * string (* Access a field in a struct *)
   [@@deriving show, eq]
 
 type condition =
@@ -77,10 +78,11 @@ type action =
   | ForIn of string * string * action list
   | Write of string
   | Let of string * expression  (* Define variables *)
+  | NoOp  (* No operation *)
   [@@deriving show, eq]
 
 type program = {
-  file_def: file_def;
+  file_defs: file_def list;
   actions: action list;
 } [@@deriving show, eq]
 
@@ -91,6 +93,5 @@ type source =
 
 type script = {
   scheme: source;
-  actions: source option;
   binary_file: string;
 } [@@deriving show, eq]

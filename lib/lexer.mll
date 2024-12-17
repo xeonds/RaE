@@ -6,11 +6,17 @@ exception LexError of string
 let digit = ['0'-'9']
 let alpha = ['a'-'z' 'A'-'Z']
 let ident = (alpha|'_')(alpha|digit|'_')*
-let whitespace = [' ' '\t' '\n']
+let whitespace = [' ' '\t']
+let newline = '\n'
 let hex = "0x" ['0'-'9' 'a'-'f' 'A'-'F']+
+let string = '"' [^'"']* '"'
 
 rule token = parse
-  | whitespace+ { token lexbuf }
+  | whitespace { token lexbuf }
+  | newline    {
+    Lexing.new_line lexbuf;
+    token lexbuf
+   }
   | "file"     { FILE }
   | "block"    { BLOCK }
   | "metadata" { METADATA }
@@ -29,6 +35,8 @@ rule token = parse
   | "}"        { RBRACE }
   | "("        { LPAREN }
   | ")"        { RPAREN }
+  | "["        { LBRACKET }
+  | "]"        { RBRACKET }
   | ";"        { SEMICOLON }
   | ":"        { COLON }
   | "="        { EQUALS }
@@ -36,8 +44,17 @@ rule token = parse
   | "@"        { AT }
   | "+"        { PLUS }
   | "*"        { TIMES }
+  | "."        { DOT }
   | hex as h   { HEXNUM (int_of_string h) }
   | digit+ as d { NUM (int_of_string d) }
   | ident as i  { IDENT i }
+  | "/*"       { comment lexbuf; token lexbuf }
+  | string as s { LITERAL s }
   | eof        { EOF }
   | _ as c     { raise (LexError ("Unexpected character: " ^ String.make 1 c)) }
+
+and comment = parse
+  | "*/"       { () }
+  | "/*"       { comment lexbuf; comment lexbuf }
+  | _          { comment lexbuf }
+

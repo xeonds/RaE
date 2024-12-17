@@ -15,10 +15,11 @@ let trim_shebang content =
 let parse_command_line args =
   match args with
   | [script; binary_file] ->
+      (* test if the arg1 is a script file, or a script content *)
       if Filename.check_suffix script ".RaE" || Filename.check_suffix script ".rae" then
-        { scheme = File script; actions = None; binary_file }
+        { scheme = File script; binary_file }
       else
-        { scheme = Inline script; actions = None; binary_file }
+        { scheme = Inline script; binary_file }
   | _ ->
       raise (Script_error "Invalid arguments. Usage: rae <script.RaE | \"scheme\"> <binary_file>")
 

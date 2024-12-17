@@ -4,6 +4,7 @@ type value =
   | VInt of int
   | VString of string
   | VBool of bool
+  | ParsedFile of parsed_file
 
 type env = (string * value) list
 
@@ -22,37 +23,81 @@ let rec eval_expr env = function
       (match (eval_expr env e1, eval_expr env e2) with
       | (VInt n1, VInt n2) -> VInt (n1 * n2)
       | _ -> failwith "Type error in multiplication")
+  | Access (e, _field) ->
+      (match eval_expr env e with
+      (* TODO: parse sub fields and redesign dsl structs *)
+      | ParsedFile _parsed -> eval_expr env e
+          (* let field = List.find (fun f -> f.name = field) parsed.blocks in
+          (match field.value with
+          | Some bytes -> VString (Bytes.to_string bytes)
+          | None -> failwith "Field not parsed") *)
+      | _ -> failwith "Type error in field access")
 
+let string_of_value = function
+  | VInt n -> string_of_int n
+  | VString s -> s
+  | VBool b -> string_of_bool b
+  | ParsedFile _ -> "<parsed file>"
 
-let rec eval_action env = function
-  | If (cond, actions) ->
-      begin match eval_expr env cond with
-      | VBool true -> List.iter (eval_action env) actions
-      | VBool false -> ()
-      | _ -> failwith "Condition must evaluate to boolean"
-      end
-  | Echo s -> print_endline s
-  | ForIn (_var, _collection, _actions) ->
-      (* TODO: Implement iteration *)
-          ()
-      | IfElse (cond, then_actions, else_actions) ->
-          begin match eval_expr env cond with
-          | VBool true -> List.iter (eval_action env) then_actions
-          | VBool false -> List.iter (eval_action env) else_actions
-          | _ -> failwith "Condition must evaluate to boolean"
-          end
-      | Let (var, expr) ->
-          let value = eval_expr env expr in
-          eval_action ((var, value) :: env)
-  | Write _filename ->
-      (* TODO: Implement file writing *)
-      ()
+let value_of_parsed_file parsed = ParsedFile parsed
+
+let rec eval_actions env actions = match actions with
+  | [] -> ()
+  | action :: rest ->
+      let env' = match action with
+      | Let (x, expr) ->
+          let v = eval_expr env expr in
+          (x, v) :: env
+      | If(expr, actions) -> 
+          let v = eval_expr env expr in
+          (match v with
+          | VBool true -> let _ = eval_actions env actions in env
+          | VBool false -> env
+          | _ -> failwith "Type error in if condition")
+      | IfElse(expr, actions1, actions2) -> 
+        let v = eval_expr env expr in
+          (match v with
+          | VBool true -> let _ = eval_actions env actions1 in env
+          | VBool false -> let _ = eval_actions env actions2 in env
+          | _ -> failwith "Type error in if condition")
+      | ForIn(x, range, actions) -> 
+        let v = List.assoc range env in
+          (match v with
+          | VInt n -> 
+              let rec loop env i =
+                if i = n then env
+                else
+                  let env' = (x, VInt i) :: env in
+                  let _ = eval_actions env' actions in
+                  loop env (i + 1)
+              in
+              loop env 0
+          | _ -> failwith "Type error in for loop")
+      | Echo s -> 
+          print_endline s;
+          env
+      | Write filename ->
+          let oc = open_out filename in
+          List.iter (fun (x, v) -> Printf.fprintf oc "%s = %s\n" x (string_of_value v)) env;
+          close_out oc;
+          env
+      | NoOp -> env
+      in
+      eval_actions env' rest
 
 let read_file filename =
   let ic = open_in filename in
   let content = really_input_string ic (in_channel_length ic) in
   close_in ic;
   content
+
+let read_binary_file filename =
+  let ic = open_in_bin filename in
+  let len = in_channel_length ic in
+  let bytes = Bytes.create len in
+  really_input ic bytes 0 len;
+  close_in ic;
+  bytes
 
 let parse_source = function
   | File filename -> read_file filename

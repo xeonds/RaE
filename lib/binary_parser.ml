@@ -8,6 +8,7 @@ module BinaryParser = struct
     | Equal (lhs, rhs) -> evaluate_expression lhs offset + evaluate_expression rhs offset
     | Plus (lhs, rhs) -> evaluate_expression lhs offset + evaluate_expression rhs offset
     | Times (lhs, rhs) -> evaluate_expression lhs offset * evaluate_expression rhs offset
+    | Access (expr, _) -> evaluate_expression expr offset
 
   (* Utility to parse a specific field *)
   let parse_field (input: bytes) (field: field) (offset: int) : (parsed_field * int) parse_result =
@@ -32,6 +33,7 @@ module BinaryParser = struct
 
   (* Utility to parse a block *)
   let parse_block (input: bytes) (block: block) (offset: int) : (parsed_block * int) parse_result =
+    Printf.printf "Parsing block %s at offset %d\n" block.name offset;
     let rec parse_fields fields acc offset =
       match fields with
       | [] -> Ok (List.rev acc, offset)
