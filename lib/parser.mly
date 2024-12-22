@@ -1,120 +1,295 @@
 %{
 open Ast
-open Types
+
+let make_loc startpos endpos = 
+  let loc_start = {
+    pos_fname = startpos.Lexing.pos_fname;
+    pos_lnum = startpos.Lexing.pos_lnum;
+    pos_bol = startpos.Lexing.pos_bol;
+    pos_cnum = startpos.Lexing.pos_cnum;
+  } in
+  let loc_end = {
+    pos_fname = endpos.Lexing.pos_fname;
+    pos_lnum = endpos.Lexing.pos_lnum;
+    pos_bol = endpos.Lexing.pos_bol;
+    pos_cnum = endpos.Lexing.pos_cnum;
+  } in
+  { loc_start; loc_end }
+
+let make_id name loc = (name, loc)
 %}
 
 %token <string> IDENT
-%token <int> NUM
-%token <int> HEXNUM
-%token <string> LITERAL
-%token FILE BLOCK METADATA
-%token LET IF ELSE FOR IN ECHO
-%token LBRACE RBRACE LPAREN RPAREN LBRACKET RBRACKET
-%token SEMICOLON COLON EQUALS DOUBLE_EQUALS AT DOT
-%token PLUS TIMES
-%token U8 U16 U32 STRING BLOB
-%token EOF
+%token <int> INT
+%token <float> FLOAT
+%token <string> STRING_LIT
 
-%start <program> program
+%token FILE STRUCT ENUM BITFIELD IF TEMPLATE VARIANT
+%token I8 I16 I32 I64 U8 U16 U32 U64 F32 F64 HEX DEC OCT BIN
+%token STRING BYTES ARRAY
+%token LBRACE RBRACE LPAREN RPAREN LBRACK RBRACK
+%token LT GT EQUAL COLON SEMICOLON COMMA DOT AT BANG MINUS
+%token FATARROW EOF
+
+%start <Ast.program> program
 
 %%
 
 program:
-  | f=file_def* a=action* EOF { { file_defs=f; actions=a } }
-  ;
+  | files = file_def* a=expr* EOF
+    { { files; actions=a; loc = make_loc $startpos $endpos } }
+;
 
 file_def:
-  | FILE n=IDENT LBRACE m=metadata b=block* RBRACE
-    { create_file_def n m b }
-  ;
+  | FILE name = identifier LBRACE defs = def* RBRACE
+    { { name; definitions = defs; loc = make_loc $startpos $endpos } }
+;
 
-metadata:
-  | METADATA LBRACE e=endianness a=alignment? RBRACE
-    { { endian=e; alignment=a } }
-  ;
+def:
+  | struct_def  { $1 }
+  | enum_def    { $1 }
+  | bitfield_def { $1 }
+  | template_def { $1 }
+;
 
-endianness:
-  | IDENT COLON e=IDENT SEMICOLON
-    { match e with
-      | "little" -> Little
-      | "big" -> Big
-      | _ -> failwith "Invalid endianness"
+struct_def:
+  | STRUCT name = identifier type_params = type_params? 
+    condition = struct_condition? LBRACE 
+    members = struct_item* RBRACE
+    { StructDef {
+        name;
+        type_params = Option.value type_params ~default:[];
+        members;
+        condition;
+        loc = make_loc $startpos $endpos
+      }
     }
-  ;
+;
 
-alignment:
-  | IDENT COLON n=NUM SEMICOLON { n }
-  ;
+enum_def:
+  | ENUM name = identifier COLON typ = type_expr LBRACE 
+    members = enum_variant* RBRACE
+    { EnumDef {
+        name;
+        base_type = typ;
+        members;
+        loc = make_loc $startpos $endpos
+      }
+    }
+;
 
-block:
-  | BLOCK n=IDENT LBRACE f=field* RBRACE r=repeat a=annotations 
-    { create_block n f r a }
-  ;
+enum_variant:
+  | name = identifier EQUAL value = expr SEMICOLON
+    { { name; value; loc = make_loc $startpos $endpos } }
+;
 
-field:
-  | n=IDENT COLON t=data_type o=offset c=condition SEMICOLON
-    { create_field n t o (match c with Some e -> e | None -> NoCondition) [] (* TODO: support annotations *) }
-  ;
+bitfield_def:
+  | BITFIELD name = identifier LBRACE 
+    fields = bitfield_item* RBRACE
+    { BitFieldDef {
+        name;
+        fields;
+        loc = make_loc $startpos $endpos
+      }
+    }
+;
 
-offset:
-  | AT e=expression { Some e }
-  | { None }
-  ;
+bitfield_item:
+  | name = identifier COLON size = INT SEMICOLON
+    { 
+      let loc = make_loc $startpos $endpos in
+      let attrs = [Size(IntLit(size, loc), loc)] in
+      { name; attributes = attrs; loc = make_loc $startpos $endpos; offset = Fixed(IntLit(0, loc), loc); type_expr = BasicType(U8, loc) } 
+    }
+;
 
-data_type:
-  | U8 { UInt8 }
-  | U16 { UInt16 }
-  | U32 { UInt32 }
-  | STRING LPAREN e=expression RPAREN { String e }
-  | BLOB LPAREN e=expression RPAREN { Blob e }
-  | IDENT { Custom $1 }
-  | t=data_type LBRACKET e=expression RBRACKET { Array (t, e) }
-  ;
+template_def:
+  | TEMPLATE LT param = type_param GT name = identifier LBRACE 
+    members = template_item* RBRACE
+    { TemplateDef {
+        param;
+        name;
+        members;
+        loc = make_loc $startpos $endpos
+      }
+    }
+;
 
-repeat:
-  // TODO: support var define in repeat
-  | FOR LPAREN IDENT COLON e=expression RPAREN { Some e }
-  | { None }
-  ;
+template_item:
+  | name = identifier COLON typ = type_expr 
+    attrs = attributes? offset = offset_expr SEMICOLON
+    { { name; 
+        type_expr = typ;
+        attributes = Option.value attrs ~default:[];
+        offset;
+        loc = make_loc $startpos $endpos 
+      } 
+    }
+;
 
-annotations:
-  | AT LBRACE a=annotation_list RBRACE { a }
-  | { [] }
-  ;
+struct_condition:
+  | IF EQUAL LPAREN e = expr RPAREN { e }
+;
 
-annotation_list:
-  | a=annotation SEMICOLON al=annotation_list { a :: al }
-  | { [] }
-  ;
+type_params:
+  | LT params = separated_list(COMMA, type_param) GT { params }
+;
 
-annotation:
-  | k=IDENT COLON v=LITERAL { (k, v) }
-  ;
+type_param:
+  | name = identifier { { name; loc = make_loc $startpos $endpos } }
+;
 
-condition:
-  | DOUBLE_EQUALS e=expression { Some (Equals e) }
-  | { None }
-  ;
-expression:
-  | n=NUM { Int n }
-  | n=HEXNUM { Int n }
-  | i=IDENT { Var i }
-  | e1=expression DOUBLE_EQUALS e2=expression { Equal (e1, e2) }
-  | e1=expression PLUS e2=expression { Plus (e1, e2) }
-  | e1=expression TIMES e2=expression { Times (e1, e2) }
-  | e=expression DOT i=IDENT { Access (e, i) }
-  ;
+struct_item:
+  | field = field_decl { Field field }
+  | VARIANT LPAREN name = identifier RPAREN LBRACE 
+    cases = variant_case* RBRACE
+    { Variant(name, cases, make_loc $startpos $endpos) }
+;
 
-action:
-  | IF LPAREN e=expression RPAREN LBRACE a=action* RBRACE ELSE LBRACE b=action* RBRACE
-    { IfElse (e, a, b) }
-  | IF LPAREN e=expression RPAREN LBRACE a=action* RBRACE
-    { If (e, a) }
-  | ECHO s=LITERAL SEMICOLON
-    { Echo s }
-  | FOR LPAREN i=IDENT IN c=IDENT RPAREN LBRACE a=action* RBRACE
-    { ForIn (i, c, a) }
-  | LET i=IDENT EQUALS e=expression SEMICOLON
-    { Let (i, e) }
-  | SEMICOLON { NoOp }
-  ;
+variant_case:
+  | pattern = expr FATARROW LBRACE fields = field_decl* RBRACE
+    { { pattern; fields; loc = make_loc $startpos $endpos } }
+;
+
+field_decl:
+  | name = identifier COLON typ = type_expr 
+    attrs = attributes? offset = offset_expr SEMICOLON
+    { { name; 
+        type_expr = typ;
+        attributes = Option.value attrs ~default:[];
+        offset;
+        loc = make_loc $startpos $endpos 
+      } 
+    }
+;
+
+type_expr:
+  | basic_type 
+    { BasicType($1, make_loc $startpos $endpos) }
+  | ARRAY LT t = type_expr GT
+    { ArrayType(t, make_loc $startpos $endpos) }
+  | STRING LPAREN enc = STRING_LIT? RPAREN
+    { StringType(enc, make_loc $startpos $endpos) }
+  | BYTES
+    { BytesType(make_loc $startpos $endpos) }
+  | name = identifier params = type_params?
+    { match params with
+      | None -> StructType(name, make_loc $startpos $endpos)
+      | Some p -> TemplateType(name, p, make_loc $startpos $endpos)
+    }
+;
+
+basic_type:
+  | I8  { I8 }  | I16 { I16 } | I32 { I32 } | I64 { I64 }
+  | U8  { U8 }  | U16 { U16 } | U32 { U32 } | U64 { U64 }
+  | F32 { F32 } | F64 { F64 }
+;
+
+endian_type:
+  | IDENT { match $1 with
+            | "little" -> ELittle
+            | "big" -> EBig
+            | "dynamic" -> EDynamic
+            | _ -> failwith "Unknown endian type"
+          }
+radix_type:
+  | HEX { Hex }
+  | DEC { Dec }
+  | OCT { Oct }
+  | BIN { Bin }
+
+padding_type:
+  | IDENT { match $1 with
+            | "none" -> PNone
+            | "zero" -> PZero
+            | "custom" -> PCustom
+            | _ -> failwith "Unknown padding type"
+          }
+
+attributes:
+  | LBRACK attrs = separated_list(COMMA, attribute) RBRACK { attrs }
+;
+
+attribute:
+  | IDENT EQUAL expr
+    { match $1 with
+      | "align" -> Align($3, make_loc $startpos $endpos)
+      | "pack" -> Pack($3, make_loc $startpos $endpos)
+      | "size" -> Size($3, make_loc $startpos $endpos)
+      | "count" -> Count($3, make_loc $startpos $endpos)
+      | "stride" -> Stride($3, make_loc $startpos $endpos)
+      | "if" -> If($3, make_loc $startpos $endpos)
+      | "validate" -> Validate($3, make_loc $startpos $endpos)
+      | _ -> failwith "Unknown attribute"
+    }
+  | IDENT EQUAL endian_type
+    { Endian($3, make_loc $startpos $endpos) }
+  | IDENT EQUAL STRING_LIT
+    { Encoding($3, make_loc $startpos $endpos) }
+  | IDENT LPAREN radix_type RPAREN
+    { Radix($3, make_loc $startpos $endpos) }
+  | IDENT LPAREN padding_type RPAREN
+    { Padding($3, make_loc $startpos $endpos) }
+  | IDENT LPAREN expr* RPAREN
+    { match $1 with
+      | "range" -> if List.length $3 = 2 then
+                     Range(List.nth $3 0, List.nth $3 1, make_loc $startpos $endpos)
+                   else
+                     failwith "Range attribute requires 2 arguments"
+      | "set" -> Set($3, make_loc $startpos $endpos)
+      | _ -> failwith "Unknown attribute"
+    }
+;
+
+offset_expr:
+  | AT INT
+    { Fixed(IntLit($2, make_loc $startpos $endpos), 
+            make_loc $startpos $endpos) }
+  | AT IDENT LPAREN expr RPAREN
+    { match $2 with
+      | "align" -> Align($4, make_loc $startpos $endpos)
+      | _ -> Dynamic($4, make_loc $startpos $endpos)
+    }
+  | AT IDENT LPAREN identifier RPAREN
+    { Align(Identifier($4), make_loc $startpos $endpos) }
+;
+
+expr:
+  | INT
+    { IntLit($1, make_loc $startpos $endpos) }
+  | FLOAT
+    { FloatLit($1, make_loc $startpos $endpos) }
+  | STRING_LIT
+    { StringLit($1, make_loc $startpos $endpos) }
+  | identifier
+    { Identifier($1) }
+  | expr binary_op expr
+    { BinaryOp($2, $1, $3, make_loc $startpos $endpos) }
+  | unary_op expr
+    { UnaryOp($1, $2, make_loc $startpos $endpos) }
+  | expr DOT identifier
+    { FieldAccess($1, $3, make_loc $startpos $endpos) }
+  | expr LBRACK expr RBRACK
+    { ArrayAccess($1, $3, make_loc $startpos $endpos) }
+  | identifier LPAREN args = separated_list(COMMA, expr) RPAREN
+    { FunctionCall($1, args, make_loc $startpos $endpos) }
+;
+
+binary_op:
+  | EQUAL EQUAL { Eq }
+  | LT      { Lt }
+  | GT      { Gt }
+  | LT EQUAL { Le }
+  | GT EQUAL { Ge }
+  /* Add other operators as needed */
+;
+
+unary_op:
+  | BANG { Not }
+  | MINUS { Neg }
+  /* Add other operators as needed */
+;
+
+identifier:
+  | name = IDENT { make_id name (make_loc $startpos $endpos) }
+;

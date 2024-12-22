@@ -1,60 +1,94 @@
 {
 open Parser
-exception LexError of string
+open Lexing
+
+exception SyntaxError of string
+
+let next_line lexbuf =
+  let pos = lexbuf.lex_curr_p in
+  lexbuf.lex_curr_p <- 
+    { pos with pos_bol = lexbuf.lex_curr_pos;
+               pos_lnum = pos.pos_lnum + 1
+    }
 }
 
 let digit = ['0'-'9']
+let hex = ['0'-'9' 'a'-'f' 'A'-'F']
 let alpha = ['a'-'z' 'A'-'Z']
-let ident = (alpha|'_')(alpha|digit|'_')*
-let whitespace = [' ' '\t']
-let newline = '\n'
-let hex = "0x" ['0'-'9' 'a'-'f' 'A'-'F']+
-let string = '"' [^'"']* '"'
+let id = (alpha|'_')(alpha|digit|'_')*
+let whitespace = [' ' '\t']+
+let newline = '\r' | '\n' | "\r\n"
 
 rule token = parse
   | whitespace { token lexbuf }
-  | newline    {
-    Lexing.new_line lexbuf;
-    token lexbuf
-   }
+  | newline    { next_line lexbuf; token lexbuf }
+  | "//"       { single_line_comment lexbuf }
+  | "/*"       { multi_line_comment lexbuf }
+  
+  (* Keywords *)
   | "file"     { FILE }
-  | "block"    { BLOCK }
-  | "metadata" { METADATA }
-  | "let"      { LET }
+  | "struct"   { STRUCT }
+  | "enum"     { ENUM }
+  | "bitfield" { BITFIELD }
   | "if"       { IF }
-  | "else"     { ELSE }
-  | "for"      { FOR }
-  | "in"       { IN }
-  | "echo"     { ECHO }
-  | "u8"       { U8 }
-  | "u16"      { U16 }
-  | "u32"      { U32 }
-  | "string"   { STRING }
-  | "blob"     { BLOB }
+  | "template" { TEMPLATE }
+  | "variant"  { VARIANT }
+  
+  (* Basic Types *)
+  | "I8"       { I8 }
+  | "I16"      { I16 }
+  | "I32"      { I32 }
+  | "I64"      { I64 }
+  | "U8"       { U8 }
+  | "U16"      { U16 }
+  | "U32"      { U32 }
+  | "U64"      { U64 }
+  | "F32"      { F32 }
+  | "F64"      { F64 }
+  | "STRING"   { STRING }
+  | "BYTES"    { BYTES }
+  | "ARRAY"    { ARRAY }
+  | "HEX"      { HEX }
+  | "DEC"      { DEC }
+  | "OCT"      { OCT }
+  | "BIN"      { BIN }
+  
+  (* Symbols *)
   | "{"        { LBRACE }
   | "}"        { RBRACE }
   | "("        { LPAREN }
   | ")"        { RPAREN }
-  | "["        { LBRACKET }
-  | "]"        { RBRACKET }
-  | ";"        { SEMICOLON }
+  | "["        { LBRACK }
+  | "]"        { RBRACK }
+  | "<"        { LT }
+  | ">"        { GT }
+  | "="        { EQUAL }
   | ":"        { COLON }
-  | "="        { EQUALS }
-  | "=="       { DOUBLE_EQUALS }
-  | "@"        { AT }
-  | "+"        { PLUS }
-  | "*"        { TIMES }
+  | ";"        { SEMICOLON }
+  | ","        { COMMA }
   | "."        { DOT }
-  | hex as h   { HEXNUM (int_of_string h) }
-  | digit+ as d { NUM (int_of_string d) }
-  | ident as i  { IDENT i }
-  | "/*"       { comment lexbuf; token lexbuf }
-  | string as s { LITERAL s }
-  | eof        { EOF }
-  | _ as c     { raise (LexError ("Unexpected character: " ^ String.make 1 c)) }
+  | "@"        { AT }
+  | "=>"       { FATARROW }
+  | "!"        { BANG }
+  | "-"        { MINUS }
+  
+  (* Literals *)
+  | digit+ as i     { INT(int_of_string i) }
+  | "0x" hex+ as h  { INT(int_of_string h) }
+  | digit+ "." digit+ as f { FLOAT(float_of_string f) }
+  | '"' ([^'"']* as s) '"' { STRING_LIT(s) }
+  
+  (* Identifiers *)
+  | id as text  { IDENT(text) }
+  | eof         { EOF }
+  | _ as c      { raise (SyntaxError ("Unexpected char: " ^ Char.escaped c)) }
 
-and comment = parse
-  | "*/"       { () }
-  | "/*"       { comment lexbuf; comment lexbuf }
-  | _          { comment lexbuf }
+and single_line_comment = parse
+  | newline { next_line lexbuf; token lexbuf }
+  | eof     { EOF }
+  | _       { single_line_comment lexbuf }
 
+and multi_line_comment = parse
+  | "*/"    { token lexbuf }
+  | newline { next_line lexbuf; multi_line_comment lexbuf }
+  | _       { multi_line_comment lexbuf }

@@ -31,16 +31,17 @@ type field = {
   annotations: (string * string) list; (* Additional metadata *)
 } [@@deriving show, eq]
 
-type block = {
-  name: string;
-  fields: field list;
-  repeat: expression option; (* Repeat block based on a condition *)
-  annotations: (string * string) list; (* Additional metadata *)
-} [@@deriving show, eq]
-
 type metadata = {
   endian: endianness;
   alignment: int option;
+} [@@deriving show, eq]
+
+type block = {
+  name: string;
+  fields: field list;
+  sub_blocks: block list; (* Recursive definition: a block can contain other blocks *)
+  repeat: expression option; (* Repeat block based on a condition *)
+  annotations: (string * string) list; (* Additional metadata *)
 } [@@deriving show, eq]
 
 type file_def = {

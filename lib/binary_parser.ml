@@ -15,9 +15,7 @@ module BinaryParser = struct
     try
       (* Evaluate offset, handle dynamic offsets *)
       let resolved_offset = match field.offset with
-        | Some expr -> 
-          let evaluated_offset = evaluate_expression expr offset in
-          evaluated_offset
+        | Some expr -> evaluate_expression expr offset
         | None -> offset
       in
       (* Parse data based on type *)
