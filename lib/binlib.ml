@@ -1,7 +1,7 @@
-open Types
+open Ast
 
 module BinaryParser = struct
-  let rec evaluate_expression (expr: expression) (offset: int) : int =
+  let rec evaluate_expression (expr: expr) (offset: int) : int =
     match expr with
     | Int i -> i
     | Var _ -> offset

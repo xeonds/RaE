@@ -2,7 +2,7 @@
 
 处理二进制的核心引擎，语言标准库和解释器内核。
 
-## design
+## RaE 语言规范
 
 RaE (RaE) 是一个声明式的二进制文件描述语言，用于定义和解析复杂的二进制文件格式和协议。它的设计理念是：
 - 声明式优于命令式
@@ -10,9 +10,9 @@ RaE (RaE) 是一个声明式的二进制文件描述语言，用于定义和解�
 - 强大的依赖关系表达
 - 灵活的验证机制
 
-## 2. 基础结构
+### 基础结构
 
-### 2.1 文件定义
+#### 文件定义
 
 ```
 file IDENTIFIER {
@@ -20,7 +20,7 @@ file IDENTIFIER {
 }
 ```
 
-### 2.2 类型系统
+#### 类型系统
 
 ```
 基本类型:
@@ -36,7 +36,7 @@ file IDENTIFIER {
 - ENUM                 // 枚举
 ```
 
-### 2.3 结构定义
+#### 结构定义
 
 ```
 // 结构体
@@ -57,9 +57,9 @@ enum IDENTIFIER : U8 {
 }
 ```
 
-## 3. 字段声明语法
+### 字段声明语法
 
-### 3.1 基本语法
+#### 基本语法
 
 ```
 name : type [attributes] @ offset;
@@ -71,7 +71,7 @@ name : type [attributes] @ offset;
 @ offset(expr)      // 动态偏移
 ```
 
-### 3.2 字段属性
+#### 字段属性
 
 ```
 // 数据表示
@@ -96,9 +96,9 @@ range = (min..max)               // 值范围
 set = [value1, value2, ...]      // 有效值集合
 ```
 
-## 4. 高级特性
+### 高级特性
 
-### 4.1 条件结构
+#### 条件结构
 
 ```
 // 条件结构体
@@ -117,7 +117,7 @@ struct Packet {
 }
 ```
 
-### 4.2 模板和泛型
+#### 模板和泛型
 
 ```
 template<T> HeaderBlock {
@@ -127,7 +127,7 @@ template<T> HeaderBlock {
 }
 ```
 
-### 4.3 递归结构
+#### 递归结构
 
 ```
 struct Node {
@@ -137,9 +137,9 @@ struct Node {
 }
 ```
 
-## 5. 表达式系统
+### 表达式系统
 
-### 5.1 内置函数
+#### 内置函数
 
 ```
 // 基础操作
@@ -159,7 +159,7 @@ map_value(value, mapping)  // 值映射
 find_pattern(data, pattern) // 模式查找
 ```
 
-### 5.2 路径引用
+#### 路径引用
 
 ```
 // 绝对路径
@@ -174,7 +174,7 @@ array[0]
 array[index_field]
 ```
 
-### 5.3 表达式和条件
+#### 表达式和条件
 
 ```
 // 比较操作
@@ -193,9 +193,9 @@ field in range(0x00..0xFF)
 field in set(0x01, 0x02, 0x05)
 ```
 
-## 6. 完整示例
+### 完整示例
 
-### 6.1 简单文件格式
+#### 简单文件格式
 
 ```
 file SimpleFile {
@@ -253,7 +253,7 @@ file ImageFormat {
 }
 ```
 
-### 6.2 复杂协议包
+#### 复杂协议包
 
 ```
 file ProtocolPacket {
@@ -296,7 +296,7 @@ file ProtocolPacket {
 }
 ```
 
-### 6.3 数据结构示例
+#### 数据结构示例
 
 ```
 file DataStructure {
@@ -318,3 +318,11 @@ file DataStructure {
     data : Data @ 0x00;
 }
 ```
+
+## interpreter
+
+RaE 语言解释器，用于执行 RaE 的脚本语言部分。
+
+## script_parser
+
+RaE 脚本解析器，用于解析及预处理 RaE源代码。
