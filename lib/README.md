@@ -1,10 +1,11 @@
-## binlib
+# 核心库模块
 
-处理二进制的核心引擎，语言标准库和解释器内核。
+包含 RaE 语言的ast模块，文件定义和脚本两部分的解释器模块，以及二进制格式工具库。
 
 ## RaE 语言规范
 
 RaE (RaE) 是一个声明式的二进制文件描述语言，用于定义和解析复杂的二进制文件格式和协议。它的设计理念是：
+
 - 声明式优于命令式
 - 简洁性和表达力的平衡
 - 强大的依赖关系表达
@@ -319,10 +320,84 @@ file DataStructure {
 }
 ```
 
-## interpreter
+### RaE-脚本部分定义
 
-RaE 语言解释器，用于执行 RaE 的脚本语言部分。
+这部分是该语言的脚本引擎部分，用于执行对于RaE解析后的二进制文件的实际操作，并提供部分语言内置库函数来增强实际操作能力。
 
-## script_parser
+#### 文件声明与加载
 
-RaE 脚本解析器，用于解析及预处理 RaE源代码。
+```plaintext
+file a {
+    field1: int32;
+    field2: string;
+}
+
+f1, f2 = a.load("file1", "file2");
+f1.save("output1.bin");
+```
+
+#### 变量定义和数据访问
+
+```plaintext
+let var = expr;  // 定义一个变量并赋值
+file1.a.b.c = 42;  // 修改字段c
+file2.c.d.e[2] = 100;  // 修改数组中的元素
+file2.header.type="${expr}";    // 修改该field为该字符模板解析后的内容
+file2.c=a.struct1{
+    field1: xxx,
+    field2: bitfield1 {
+        field1: 0b101, ...
+    }...
+}; // 利用file a {struct struct1{}} 中的定义的结构体来创建一个实际的数据体并赋值给file2的域c，需要保证类型一致
+file1.[a,b,c.[d,e]]=file2.[a,b,c.[d,f]] // 树状赋值，注意的是每个域的类型必须一致
+```
+
+#### 流程控制
+
+```plaintext
+if (condition) {
+    // block
+} else { //optional
+    // block
+}
+
+match (expr) {
+    pattern1 -> { block1 }
+    pattern2 -> { block2 }
+    _ -> { block3 }
+}
+```
+
+#### 函数系统
+
+```plaintext
+[].sum(func);
+[].max(func);
+[].map(func);
+[].reduce(func)
+[].filter(func);
+echo("The value of var is: ${var}"); // 模板字符串"${item}"在程序何处都会被自动替换为变量值
+let increment = (x) => x + 1;
+let result = [a,b,c].map(increment);
+let result = [a,b,c].map((x)=>{expr});
+```
+
+## binlib
+
+二进制文件工具库。包含二进制文件/流读写，二进制数据序列化为基本类型，二进制校验和相关计算，二进制文件生成等功能。
+
+### 二进制文件读写
+
+### 二进制到基本数据类型的序列化/反序列化
+
+### 二进制运算库
+
+## core
+
+RaE 脚本解析器，用于预处理及执行RaE源代码。
+
+### 预处理
+
+### 二进制序列化引擎
+
+### RaE脚本执行引擎
