@@ -254,6 +254,7 @@ offset_expr:
     { Align(Identifier($4), make_loc $startpos $endpos) }
 ;
 
+/* TODO: add rae script sentence defination to here, which means actions are expressions, even loop and match has return value */
 expr:
   | INT
     { IntLit($1, make_loc $startpos $endpos) }

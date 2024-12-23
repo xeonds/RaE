@@ -320,17 +320,16 @@ file DataStructure {
 }
 ```
 
-### RaE-脚本部分定义
+### RaE-脚本部分
 
-这部分是该语言的脚本引擎部分，用于执行对于RaE解析后的二进制文件的实际操作，并提供部分语言内置库函数来增强实际操作能力。
+脚本部分语言的定义。
 
-#### 文件声明与加载
+该部分用于执行对于RaE解析后的二进制文件的实际操作，并提供部分语言内置库函数来增强实际操作能力。
+
+#### 文件模型声明与加载
 
 ```plaintext
-file a {
-    field1: int32;
-    field2: string;
-}
+file a { ... } // 参考上一部分
 
 f1, f2 = a.load("file1", "file2");
 f1.save("output1.bin");
@@ -366,6 +365,12 @@ match (expr) {
     pattern2 -> { block2 }
     _ -> { block3 }
 }
+
+// for will call its {} with every item in return value of expr with alias of i
+// return value can be [] or single item, then item will be [item]
+for(let i = expr){
+    expr    // variant i can be used in this scope
+}
 ```
 
 #### 函数系统
@@ -388,16 +393,26 @@ let result = [a,b,c].map((x)=>{expr});
 
 ### 二进制文件读写
 
-### 二进制到基本数据类型的序列化/反序列化
+各种粒度的读写和保存函数
+
+### 序列化/反序列化
+
+基本数据类型的序列化和反序列化
 
 ### 二进制运算库
 
-## core
+## rae_engine
 
-RaE 脚本解析器，用于预处理及执行RaE源代码。
+位运算，校验等函数
 
 ### 预处理
 
+导入文件定义和外部so库
+
 ### 二进制序列化引擎
 
+根据rae解析得到的ast和基础二进制库解析和创建文件
+
 ### RaE脚本执行引擎
+
+执行RaE脚本代码，调用上面的库函数和解析得到的ast列表执行操作
