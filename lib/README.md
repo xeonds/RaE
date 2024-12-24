@@ -387,6 +387,12 @@ let result = [a,b,c].map(increment);
 let result = [a,b,c].map((x)=>{expr});
 ```
 
+## ast
+
+RaE语言的语法树的类型定义，以及所有语言实体的类型定义。
+
+其中包含了语言直接支持的基本类型列表，所有语言实体的类型化定义等。
+
 ## binlib
 
 二进制文件工具库。包含二进制文件/流读写，二进制数据序列化为基本类型，二进制校验和相关计算，二进制文件生成等功能。
@@ -401,9 +407,9 @@ let result = [a,b,c].map((x)=>{expr});
 
 ### 二进制运算库
 
-## rae_engine
+## engine
 
-位运算，校验等函数
+ast执行引擎，包括导入语句，RaE类型声明和RaE表达式执行的支持
 
 ### 预处理
 
@@ -416,3 +422,9 @@ let result = [a,b,c].map((x)=>{expr});
 ### RaE脚本执行引擎
 
 执行RaE脚本代码，调用上面的库函数和解析得到的ast列表执行操作
+
+## parser&lexer
+
+RaE语言和语言的语素集合的形式化定义。
+
+借助ocamllex和ocamlyacc从语言规范生成语言解析器。

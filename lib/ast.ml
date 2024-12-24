@@ -135,6 +135,7 @@ type def =
 type file_def = {
   name: identifier;
   definitions: def list;
+  fields: field_decl list;
   loc: loc;
 }
 
