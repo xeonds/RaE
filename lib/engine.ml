@@ -3,14 +3,16 @@ open Ast
 exception Engine_error of string
 
 (* env is for saving states when parsing content *)
-type env = (string * value) list
+type env = (string * data_type) list
 
 (* engine has 2 parts *)
 (* one is engine for parse the bin data according to the ast.file *)
 (* another is engine for evaluating all expressions *)
 
+(* attach binary flow to given ast *)
 let eval_file_ast ast data = 
-  (* here, recursively parse the file's definations and fields *)
+  (* recursively parse the file's definations and fields *)
+  (* a def is a struct shows that how some fields are composed *)
   let rec eval_defs defs env = 
     | [] -> xxx
     | item::rest -> 
@@ -24,7 +26,7 @@ let eval_file_ast ast data =
   in
   let rec eval_fields fields data env = 
     | [] -> xxx
-    | item::rest -> 
+    | item::rest -> (
         let res = match item with
           | recursive item -> eval_fields [item] env
           | non_recursive item -> 
@@ -42,9 +44,11 @@ let eval_file_ast ast data =
                 | TemplateType -> 
         in
         [res::(eval_fields rest (shift data field.size) env)]
+    )
   in
   eval_fields ast.fields data (eval_defs ast.definations) 
 
+(* engine of running script part *)
 let rec eval_expr_ast exprs env = function
   | [], _ -> ()
   | expr::rest, _ env ->
@@ -111,12 +115,15 @@ let rec eval_expr_ast exprs env = function
       | NoOp -> env
     )
 
+(* tools for file operation *)
+(* read file as plaintext *)
 let read_file filename =
   let ic = open_in filename in
   let content = really_input_string ic (in_channel_length ic) in
   close_in ic;
   content
 
+(* read file as binary flow *)
 let read_binary_file filename =
   let ic = open_in_bin filename in
   let len = in_channel_length ic in
@@ -125,11 +132,41 @@ let read_binary_file filename =
   close_in ic;
   bytes
 
+(* command line operation utils *)
 (* convert source code from file or stdin to plaintext *)
+let parse_command_line args =
+  match args with
+  | [script; binary_file] ->
+      (* test if the arg1 is a script file, or a script content *)
+      if Filename.check_suffix script ".RaE" || Filename.check_suffix script ".rae" then
+        { scheme = File script; binary_file }
+      else
+        { scheme = Inline script; binary_file }
+  | _ ->
+      raise (Script_error "Invalid arguments. Usage: rae <script.RaE | \"scheme\"> <binary_file>")
+
 let parse_source = function
   | File filename -> read_file filename
   | Inline content -> content
 
+let parse_script_file filename =
+  let content = read_file filename in
+  let is_shebang_line str =
+    String.length str >= 2 && String.sub str 0 2 = "#!"
+  in
+  let trim_shebang content =
+    let lines = String.split_on_char '\n' content in
+    match lines with
+    | first :: rest when is_shebang_line first ->
+        String.concat "\n" rest
+    | _ -> content
+  in
+  if is_shebang_line content then
+    trim_shebang content
+  else
+    content
+
+(* preprocess source code *)
 let process_imports content =
   let import_scheme filename =
     try 
@@ -155,32 +192,3 @@ let process_imports content =
     let imported = import_scheme filename in
     acc ^ "\n" ^ imported
   ) content imports
-
-let parse_command_line args =
-  match args with
-  | [script; binary_file] ->
-      (* test if the arg1 is a script file, or a script content *)
-      if Filename.check_suffix script ".RaE" || Filename.check_suffix script ".rae" then
-        { scheme = File script; binary_file }
-      else
-        { scheme = Inline script; binary_file }
-  | _ ->
-      raise (Script_error "Invalid arguments. Usage: rae <script.RaE | \"scheme\"> <binary_file>")
-
-let parse_script_file filename =
-  let content = read_file filename in
-  let is_shebang_line str =
-    String.length str >= 2 && String.sub str 0 2 = "#!"
-  in
-  let trim_shebang content =
-    let lines = String.split_on_char '\n' content in
-    match lines with
-    | first :: rest when is_shebang_line first ->
-        String.concat "\n" rest
-    | _ -> content
-  in
-  if is_shebang_line content then
-    trim_shebang content
-  else
-    content
-

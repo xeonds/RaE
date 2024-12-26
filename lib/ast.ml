@@ -18,21 +18,24 @@ type type_param = {
   loc: loc;
 }
 
-type type_expr =
-  | BasicType of basic_type * loc
-  | ArrayType of type_expr * loc
-  | StringType of string option * loc (* encoding option *)
+type type_expr = data_type * loc
+
+and data_type = 
+  | BasicType of basic_type
+  | ArrayType of type_expr 
+  | StringType of string option 
   | BytesType of loc
   | BitFieldType of loc
-  | EnumType of identifier * loc
-  | StructType of identifier * loc
-  | TemplateType of identifier * type_param list * loc
+  | EnumType of identifier
+  | StructType of identifier
+  | TemplateType of identifier * type_param list
 
 and basic_type =
   | I8 | I16 | I32 | I64
   | U8 | U16 | U32 | U64
   | F32 | F64
 
+(* attributes are exprs in [] that following the field *)
 type attribute = 
   | Endian of endian_type * loc
   | Encoding of string * loc

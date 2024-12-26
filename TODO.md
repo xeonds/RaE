@@ -1,0 +1,14 @@
+- [ ] engine 
+    - [ ]generating struct from file ast
+    - [ ] parse binary data flow by evaluating struct
+    - [ ] evaluate expressions
+- [ ] parser
+    - [ ] authoring dsl
+    - [ ] error handling and hints
+- [ ] binlib: design this part as a module first
+    - [ ] read binary file
+        - [ ] seek to offset
+        - [ ] read subranges 
+    - [ ] write binary file
+        - [ ] write full file
+        - [ ] modify some parts and update offsets
