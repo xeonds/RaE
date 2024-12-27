@@ -1,67 +1,64 @@
 open Ast
 
-module BinaryParser = struct
-  let rec evaluate_expression (expr: expr) (offset: int) : int =
-    match expr with
-    | Int i -> i
-    | Var _ -> offset
-    | Equal (lhs, rhs) -> evaluate_expression lhs offset + evaluate_expression rhs offset
-    | Plus (lhs, rhs) -> evaluate_expression lhs offset + evaluate_expression rhs offset
-    | Times (lhs, rhs) -> evaluate_expression lhs offset * evaluate_expression rhs offset
-    | Access (expr, _) -> evaluate_expression expr offset
+module Binlib = struct
+  let rec sizeof = function
+    | I8 _ -> 1
+    | U8 _ -> 1
+    | I16 _ -> 2
+    | U16 _ -> 2
+    | I32 _ -> 4
+    | U32 _ -> 4
+    | F32 _ -> 4
+    | I64 _ -> 8
+    | U64 _ -> 8
+    | F64 _ -> 8
+    | ArrayType (n, t) -> n * sizeof t
+    | StringType s -> String.length s
+    | BytesType b -> (match b with
+      | None -> 0
+      | Some s -> String.length (Bytes.to_string s))
+    | BitFieldType (n, _) -> n
+    | EnumType _ -> 0
+    | StructType _ -> 0
+    | TemplateType _ -> 0
 
-  (* Utility to parse a specific field *)
-  let parse_field (input: bytes) (field: field) (offset: int) : (parsed_field * int) parse_result =
-    try
-      (* Evaluate offset, handle dynamic offsets *)
-      let resolved_offset = match field.offset with
-        | Some expr -> evaluate_expression expr offset
-        | None -> offset
-      in
-      (* Parse data based on type *)
-      match field.data_type with
-      | UInt8 ->
-        let value = Bytes.get_uint8 input resolved_offset in
-        Ok ({ name = field.name; value = Some (Bytes.of_string (String.make 1 (Char.chr value))) }, resolved_offset + 1)
-      | UInt16 -> (* Add support for endianness *)
-        Ok ({ name = field.name; value = None }, resolved_offset + 2) (* Placeholder *)
-      | _ -> Error ("Unsupported type", ({ name = field.name; value = None }, resolved_offset))
-    with e ->
-      Error (Printexc.to_string e, ({ name = field.name; value = None }, offset))
 
-  (* Utility to parse a block *)
-  let parse_block (input: bytes) (block: block) (offset: int) : (parsed_block * int) parse_result =
-    Printf.printf "Parsing block %s at offset %d\n" block.name offset;
-    let rec parse_fields fields acc offset =
-      match fields with
-      | [] -> Ok (List.rev acc, offset)
-      | field :: rest ->
-        (match parse_field input field offset with
-         | Ok (parsed_field, new_offset) -> parse_fields rest (parsed_field :: acc) new_offset
-         | Error (err, (parsed_field, new_offset)) ->
-           (* Attempt recovery and continue parsing remaining fields *)
-           Printf.printf "Error parsing field %s: %s\n" parsed_field.name err;
-           parse_fields rest (parsed_field :: acc) new_offset)
-    in
-    match parse_fields block.fields [] offset with
-    | Ok (fields, new_offset) -> Ok ({ name = block.name; fields }, new_offset)
-    | Error (err, (parsed_field, new_offset)) -> Error (err, ({ name = block.name; fields = parsed_field }, new_offset))
+  let pick data size = String.sub data 0 size
 
-  (* Parse the entire file *)
-  let parse_file (input: bytes) (file_def: file_def) : parsed_file parse_result =
-    let rec parse_blocks blocks acc offset =
-      match blocks with
-      | [] -> Ok (List.rev acc)
-      | block :: rest ->
-        (match parse_block input block offset with
-         | Ok (parsed_block, new_offset) -> parse_blocks rest (parsed_block :: acc) new_offset
-         | Error (err, (parsed_block, _)) ->
-           (* Attempt recovery and continue parsing remaining blocks *)
-           Printf.printf "Error parsing block %s: %s\n" parsed_block.name err;
-           parse_blocks rest (parsed_block :: acc) offset)
-    in
-    match parse_blocks file_def.blocks [] 0 with
-    | Ok blocks -> Ok { name = file_def.name; blocks }
-    | Error (err, blocks) -> Error (err, { name = file_def.name; blocks })
+  let shift data size = String.sub data size (String.length data - size)
 
+  let substring data offset size = String.sub data offset size
+
+  let rec parse_data (data_type, byte_data) =
+    match data_type with
+    | I8 _ -> I8Data(int_of_string byte_data)
+    | U8 _ -> U8Data (int_of_string byte_data)
+    | I16 _ -> I16Data (int_of_string byte_data)
+    | U16 _ -> U16Data (int_of_string byte_data)
+    | I32 _ -> I32Data (Int32.of_string byte_data)
+    | U32 _ -> U32Data (Int32.of_string byte_data)
+    | F32 _ -> F32Data (float_of_string byte_data)
+    | I64 _ -> I64Data (Int64.of_string byte_data)
+    | U64 _ -> U64Data (Int64.of_string byte_data)
+    | F64 _ -> F64Data (float_of_string byte_data)
+    | ArrayType (n, t) -> 
+        let size = n in
+        let rec loop acc i =
+          if i = size then acc
+          else
+            let item_size = sizeof t in
+            let item = pick byte_data item_size in
+            loop (acc @ [parse_data (t, item)]) (i + 1)
+        in
+        ArrayData (loop [] 0)
+    | StringType _ ->
+        let len = String.length byte_data in
+        let str = Bytes.create len in
+        Bytes.blit_string byte_data 0 str 0 len;
+        StringData (Bytes.to_string str)
+    | BytesType _ -> BytesData (Bytes.of_string byte_data)
+    | BitFieldType _ -> BitFieldData (0, Bytes.of_string byte_data)
+    | EnumType _ -> EnumData ""
+    | StructType _ -> StructData ("", [])
+    | TemplateType _ -> TemplateData ("", [])
 end

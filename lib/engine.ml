@@ -1,4 +1,5 @@
 open Ast
+open Binlib
 
 exception Engine_error of string
 
@@ -13,7 +14,7 @@ type env = (string * data_type) list
 let eval_file_ast ast data = 
   (* recursively parse the file's definations and fields *)
   (* a def is a struct shows that how some fields are composed *)
-  let rec eval_defs defs env = 
+  (* let rec eval_defs defs env = 
     | [] -> xxx
     | item::rest -> 
         let res = match item with
@@ -23,37 +24,40 @@ let eval_file_ast ast data =
           | TemplateDef t ->
         in
         [res::(eval_file_ast rest env)]
-  in
-  let rec eval_fields fields data env = 
-    | [] -> xxx
-    | item::rest -> (
-        let res = match item with
-          | recursive item -> eval_fields [item] env
-          | non_recursive item -> 
-              (* parse binary data according to field's def *)
-              (* using tools in binlib *)
-              let parsed = match field.type_expr with
-                | BasicType t -> 
-                    binlib.parse_basic t (pick data field.size) 
-                | ArrayType -> 
-                | StringType -> 
-                | BytesType -> 
-                | BitFieldType -> 
-                | EnumType -> 
-                | StructType -> 
-                | TemplateType -> 
+  in *)
+  let rec eval_field field data env = match field with
+    | [] -> []
+    | item::rest -> 
+        let len = Binlib.sizeof item in
+        let data_block = Binlib.pick data len in
+        let res = Binlib.parse_data (item, data_block)
         in
-        [res::(eval_fields rest (shift data field.size) env)]
-    )
+        res :: (eval_field rest (Binlib.shift data len) env)
   in
-  eval_fields ast.fields data (eval_defs ast.definations) 
+  let rec eval_fields fields data env =
+    (* TODO: parse offset expr to support all 4 types of offset *)
+    let rec eval_offset_expr offset_expr = match offset_expr with
+      | Fixed e -> e 
+      | After _id -> 0
+      | Align _e -> 0
+      | Dynamic _e -> 0
+    in
+    match fields with
+    | [] -> []
+    | field::rest ->
+        let offset = eval_offset_expr field.offset in
+        let data_block = Binlib.substring data offset (Binlib.sizeof field.field_type) in
+        let res = eval_field [field.field_type] data_block env in
+        res @ (eval_fields rest data env)
+  in
+  eval_fields ast.fields data []
 
 (* engine of running script part *)
 let rec eval_expr_ast exprs env = function
   | [], _ -> ()
-  | expr::rest, _ env ->
-    eval_expr_ast rest (env' = match expr with
-      | Int n -> VInt n
+  | expr::rest, _ ->
+    let env' = (match expr with
+      | IntLit n -> VInt n
       | Var x -> List.assoc x env
       | Equal (e1, e2) ->
           let v1 = eval_expr_ast env e1 in
@@ -112,8 +116,8 @@ let rec eval_expr_ast exprs env = function
           List.iter (fun (x, v) -> Printf.fprintf oc "%s = %s\n" x (string_of_value v)) env;
           close_out oc;
           env
-      | NoOp -> env
-    )
+      | NoOp -> env) in
+    eval_expr_ast rest env'
 
 (* tools for file operation *)
 (* read file as plaintext *)

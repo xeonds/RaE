@@ -1,4 +1,3 @@
-
 type location = {
   pos_fname : string;  (* 文件名 *)
   pos_lnum : int;      (* 行号 *)
@@ -6,34 +5,51 @@ type location = {
   pos_cnum : int;      (* 字符位置 *)
 }
 
+(* 源码定位 *)
 type loc = {
   loc_start: location;
   loc_end: location;
 }
 
-type identifier = string * loc
-
-type type_param = {
-  name: identifier;
-  loc: loc;
-}
-
-type type_expr = data_type * loc
+type identifier = string
 
 and data_type = 
-  | BasicType of basic_type
-  | ArrayType of type_expr 
-  | StringType of string option 
-  | BytesType of loc
-  | BitFieldType of loc
+  | I8 of int
+  | I16 of int
+  | I32 of int32
+  | I64 of int64
+  | U8  of int
+  | U16  of int
+  | U32  of int32
+  | U64 of int64
+  | F32  of float
+  | F64 of float
+  | ArrayType of int * data_type   (* 数组长度，元素类型 *)
+  | StringType of string
+  | BytesType of bytes option
+  | BitFieldType of int * bytes
   | EnumType of identifier
   | StructType of identifier
-  | TemplateType of identifier * type_param list
+  | TemplateType of identifier * identifier list
 
-and basic_type =
-  | I8 | I16 | I32 | I64
-  | U8 | U16 | U32 | U64
-  | F32 | F64
+and data = 
+  | I8Data of int
+  | I16Data of int
+  | I32Data of int32
+  | I64Data of int64
+  | U8Data of int
+  | U16Data of int
+  | U32Data of int32
+  | U64Data of int64
+  | F32Data of float
+  | F64Data of float
+  | StringData of string
+  | BytesData of bytes
+  | BitFieldData of int * bytes
+  | EnumData of identifier
+  | StructData of identifier * data list
+  | TemplateData of identifier * data list
+  | ArrayData of data list
 
 (* attributes are exprs in [] that following the field *)
 type attribute = 
@@ -81,17 +97,17 @@ and unary_op =
 
 type field_decl = {
   name: identifier;
-  type_expr: type_expr;
+  field_type: data_type;
   attributes: attribute list;
   offset: offset_expr;
   loc: loc;
 }
 
 and offset_expr =
-  | Fixed of expr * loc
-  | After of identifier * loc
-  | Align of expr * loc
-  | Dynamic of expr * loc
+  | Fixed of int
+  | After of identifier
+  | Align of expr
+  | Dynamic of expr
 
 type variant_case = {
   pattern: expr;
@@ -99,7 +115,7 @@ type variant_case = {
   loc: loc;
 }
 
-type struct_item =
+type struct_member =
   | Field of field_decl
   | Variant of identifier * variant_case list * loc
 
@@ -112,14 +128,14 @@ type enum_member = {
 type def =
   | StructDef of {
       name: identifier;
-      type_params: type_param list;
-      members: struct_item list;
+      params: identifier list;
+      members: struct_member list;
       condition: expr option;
       loc: loc;
     }
   | EnumDef of {
       name: identifier;
-      base_type: type_expr;
+      base_type: data_type;
       members: enum_member list;
       loc: loc;
     }
@@ -129,7 +145,7 @@ type def =
       loc: loc;
     }
   | TemplateDef of {
-      param: type_param;
+      param: identifier;
       name: identifier;
       members: field_decl list;
       loc: loc;

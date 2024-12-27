@@ -136,7 +136,7 @@ type_params:
 ;
 
 type_param:
-  | name = identifier { { name; loc = make_loc $startpos $endpos } }
+  | name = identifier { { name } }
 ;
 
 struct_item:
