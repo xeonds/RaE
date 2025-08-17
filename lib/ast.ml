@@ -13,6 +13,7 @@ type loc = {
 
 type identifier = string
 
+(* 基础数据类型 *)
 and data_type = 
   | I8 of int
   | I16 of int
@@ -32,6 +33,7 @@ and data_type =
   | StructType of identifier
   | TemplateType of identifier * identifier list
 
+(* 对应的数据 *)
 and data = 
   | I8Data of int
   | I16Data of int
@@ -52,6 +54,8 @@ and data =
   | ArrayData of data list
 
 (* attributes are exprs in [] that following the field *)
+(* 就是field的属性 *)
+(* 因为配合源码所以有loc源码定位字段 *)
 type attribute = 
   | Endian of endian_type * loc
   | Encoding of string * loc
@@ -71,6 +75,7 @@ and endian_type = ELittle | EBig | EDynamic
 and radix_type = Hex | Dec | Oct | Bin
 and padding_type = PNone | PZero | PCustom
 
+(* 源码ast中的表达式类型 *)
 and expr =
   | IntLit of int * loc
   | FloatLit of float * loc
@@ -95,6 +100,7 @@ and binary_op =
 and unary_op =
   | Neg | Not | BitNot
 
+(* 每一个field的ast *)
 type field_decl = {
   name: identifier;
   field_type: data_type;

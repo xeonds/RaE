@@ -6,6 +6,16 @@ exception Engine_error of string
 (* env is for saving states when parsing content *)
 type env = (string * data_type) list
 
+(* 定义记录类型和输入方案类型 *)
+type input_scheme =
+  | File of string
+  | Inline of string
+
+type config = {
+  scheme: input_scheme;
+  binary_file: string;
+}
+
 (* engine has 2 parts *)
 (* one is engine for parse the bin data according to the ast.file *)
 (* another is engine for evaluating all expressions *)
@@ -57,8 +67,7 @@ let rec eval_expr_ast exprs env = function
   | [], _ -> ()
   | expr::rest, _ ->
     let env' = (match expr with
-      | IntLit n -> VInt n
-      | Var x -> List.assoc x env
+      | IntLit (n, loc) -> I8Data n
       | Equal (e1, e2) ->
           let v1 = eval_expr_ast env e1 in
           let v2 = eval_expr_ast env e2 in
@@ -147,7 +156,7 @@ let parse_command_line args =
       else
         { scheme = Inline script; binary_file }
   | _ ->
-      raise (Script_error "Invalid arguments. Usage: rae <script.RaE | \"scheme\"> <binary_file>")
+      raise (Failure "Invalid arguments. Usage: rae <script.RaE | \"scheme\"> <binary_file>")
 
 let parse_source = function
   | File filename -> read_file filename
