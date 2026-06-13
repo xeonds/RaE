@@ -139,6 +139,39 @@ new Outer { h = new Inner { x = 1 }, c = 99 }
 | `@write("path")` | Write current value as binary to file |
 | `@select(cond)` | Filter array elements by condition |
 
+## Related work
+
+RaE sits in the "declarative schema + binary inspection" space. The closest peers:
+
+### Kaitai Struct — the most direct analogue
+YAML-declared schemas compiled into parsers for 9+ languages (C/Python/Ruby/JS/Go/Rust/Java/PHP/Perl), with a visual gallery browser. Mature, well-documented, ~3k stars.
+
+- **vs RaE**: Kaitai solves "schema → parse" thoroughly but has no native write-back or transform pipelines. RaE targets jq-style composition *and* mutation/construction in one runtime.
+
+### Construct (Python library)
+Runtime `Struct / Int32ub / Array(this, ...) / If(this.x > 0, ...)` — essentially "what RaE wants to be as a DSL". Mature, popular, but slow at runtime and painful at deep nesting (manual context passing).
+
+- **vs RaE**: Construct parses only. RaE's auto-maintained offsets/alignment/checksums aim to remove the manual bookkeeping Construct users hit. Pipeline syntax also composes more naturally than nested Python calls.
+
+### 010 Editor / ImHex
+GUI-first tools with C-like template languages. Powerful for interactive inspection (010's diff, ImHex's pattern rules), but templates are binary/non-portable and divorced from CLI workflows.
+
+- **vs RaE**: textual, git-friendly DSL; usable in scripts and CI.
+
+### jq / awk / protobuf-thrift
+Not direct competitors — design influences:
+- **jq**: path expressions, `[]`, `select(...)`, `|`
+- **awk**: pattern-action, automatic field bookkeeping
+- **Proto/Thrift**: IDL → parsers, declared types and constraints
+
+### Differentiation — what RaE must deliver to matter
+
+1. **Write-back with auto-maintained invariants** — checksum recompute, offset shifting after size changes, alignment fixup on mutate. Neither Kaitai nor Construct does this natively.
+2. **jq-style pipelines over the parsed tree** — composable extraction/transform, not just structure definition.
+3. **A killer vertical** — turnkey schemas for ELF / PE / container images / firmware, demonstrating the model end-to-end.
+
+Without (1) and (2) shipping, RaE risks being "Construct in OCaml" — a fun toy, not a tool.
+
 ## License
 
 GNU General Public License V3. See [LICENSE](LICENSE).
