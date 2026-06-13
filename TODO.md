@@ -1,21 +1,20 @@
-- [x] AST — clean types, pipeline expression grammar
+- [x] AST — pipeline expression grammar
 - [x] Lexer — case-insensitive keywords
 - [x] Parser — schema + pipeline + @block/@each/@func, 2 expected conflicts
-- [x] Engine — LE/BE parse, F32/F64 IEEE 754, I8/I16 sign ext, U64 Int64 ops
-- [x] Main — arg handling, inline/file mode, VObj root as pipeline current
-- [x] Endian — per-field [endian = le/be]
+- [x] Engine — LE/BE, F32/F64, I8-I64 sign/unsigned, U64 Int64, bounds check
+- [x] Endian — [endian = le/be]
 - [x] Nested structs — recursive parse
 - [x] Array — [count = expr], array<Type>, indexing, expand
-- [x] @block — { let id = expr; expr; ... }
+- [x] @block — { let id = expr; ... }
 - [x] @each — @each(x in arr) { body }
-- [x] @write(filename) — serialize raw bytes
-- [x] @checksum — byte-sum over VObj/VBytes/VString/VArray
+- [x] Assignment — .field = value (set_path + ref mutation)
+- [x] @write — serialize mutated tree to file
+- [x] @checksum — byte-sum over all value types
+- [x] @echo — VBytes/VArray/VObj
 - [x] After/Align/Dynamic offset
-- [x] Multi-expr via ; — .a; .b; .c (each independent)
-- [x] @echo VBytes/array/VObj
-- [x] VInt32/VInt64 mixed arithmetic
-- [x] string/bytes with size — string(5), bytes(5)
-- [x] Bounds check — clean Engine_error on out-of-bounds read
-- [ ] Assignment mutation — .field = value (in-place modify)
-- [ ] Variant dispatch — variant(type) routes to correct struct
-- [ ] Template<T> — generic type params
+- [x] Multi-expr via ;
+- [x] VInt32/VInt64 arithmetic (mixed + cross type)
+- [x] string/bytes(5) syntax
+- [x] Variant dispatch — variant(tag) { case => { fields } }
+- [x] Template<T> — template param substitution
+- [x] Input/File mode, shebang support
