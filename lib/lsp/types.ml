@@ -12,3 +12,10 @@ type diagnostic = {
   severity : int;
   message : string;
 }
+
+type completion_item = {
+  label : string;
+  kind : int;
+  detail : string;
+  insert_text : string;
+}

@@ -67,6 +67,9 @@ let handle_initialize id _params state =
       ("openClose", `Bool true);
       ("change", `Int 1)
     ]);
+    ("completionProvider", `Assoc [
+      ("triggerCharacters", `List [`String "."; `String "@"])
+    ]);
   ] in
   let result = `Assoc [("capabilities", capabilities)] in
   write_json (make_response id result);
@@ -126,6 +129,66 @@ let handle_shutdown id state =
   write_json (make_response id `Null);
   state
 
+let completions = [
+  (* keywords *)
+  ("file", 14, "keyword"); ("struct", 14, "keyword"); ("enum", 14, "keyword");
+  ("bitfield", 14, "keyword"); ("template", 14, "keyword"); ("variant", 14, "keyword");
+  ("after", 14, "keyword"); ("align", 14, "keyword"); ("let", 14, "keyword");
+  ("in", 14, "keyword"); ("new", 14, "keyword");
+  (* types *)
+  ("u8", 13, "type"); ("u16", 13, "type"); ("u32", 13, "type"); ("u64", 13, "type");
+  ("i8", 13, "type"); ("i16", 13, "type"); ("i32", 13, "type"); ("i64", 13, "type");
+  ("f32", 13, "type"); ("f64", 13, "type");
+  ("string", 13, "type"); ("bytes", 13, "type"); ("array", 13, "type");
+  (* attributes *)
+  ("count", 14, "attribute"); ("if", 14, "attribute"); ("validate", 14, "attribute");
+  ("checksum", 14, "attribute"); ("endian", 14, "attribute"); ("le", 14, "value"); ("be", 14, "value");
+  (* builtins *)
+  ("@block", 3, "function"); ("@each", 3, "function"); ("@echo", 3, "function");
+  ("@write", 3, "function"); ("@checksum", 3, "function"); ("@crc32", 3, "function");
+  ("@align", 3, "function"); ("@bswap16", 3, "function"); ("@bswap32", 3, "function");
+  ("@select", 3, "function");
+]
+
+let handle_completion id params state =
+  let uri = ref "" in let line = ref 0 in let char = ref 0 in
+  begin match params with
+  | `Assoc fields ->
+    (match List.assoc_opt "textDocument" fields with
+     | Some (`Assoc td) -> uri := (match List.assoc_opt "uri" td with Some (`String u) -> u | _ -> "")
+     | _ -> ());
+    (match List.assoc_opt "position" fields with
+     | Some (`Assoc pos) ->
+       line := (match List.assoc_opt "line" pos with Some (`Int l) -> l | _ -> 0);
+       char := (match List.assoc_opt "character" pos with Some (`Int c) -> c | _ -> 0)
+     | _ -> ());
+  | _ -> ()
+  end;
+  let prefix = match Hashtbl.find_opt state.documents !uri with
+    | Some doc ->
+      let lines = String.split_on_char '\n' doc.text in
+      if !line < List.length lines then
+        let l = List.nth lines !line in
+        let before = String.sub l 0 (min !char (String.length l)) in
+        let rec take_word s i =
+          if i > 0 && s.[i-1] <> ' ' && s.[i-1] <> '\t' && s.[i-1] <> '\n' && s.[i-1] <> ';'
+          then take_word s (i-1) else String.sub s i (String.length s - i) in
+        take_word before (String.length before)
+      else ""
+    | None -> "" in
+  let items = List.filter_map (fun (label, kind, detail) ->
+    if prefix = "" || String.length label >= String.length prefix &&
+       String.sub label 0 (String.length prefix) = prefix then
+      Some (`Assoc [
+        ("label", `String label); ("kind", `Int kind); ("detail", `String detail);
+        ("insertText", `String label)
+      ])
+    else None
+  ) completions in
+  let result = `Assoc [("isIncomplete", `Bool false); ("items", `List items)] in
+  write_json (make_response id result);
+  state
+
 let rec loop state =
   let msg =
     try read_message stdin
@@ -137,6 +200,9 @@ let rec loop state =
     loop state'
   | Some (Request { id; method_ = "shutdown"; _ }) ->
     let state' = handle_shutdown id state in
+    loop state'
+  | Some (Request { id; method_ = "textDocument/completion"; params }) ->
+    let state' = handle_completion id params state in
     loop state'
   | Some (Request { id; method_ = m; _ }) ->
     write_json (make_error id (-32601) ("Method not found: " ^ m));

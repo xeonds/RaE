@@ -1,4 +1,6 @@
 # RaE TODO
 
 ## LSP
-- [ ] **关键字补全** — LSP completion provider: 类型名 (`u8`..`u64`, `i8`..`i64`, `f32`, `f64`, `string`, `bytes`, `array`), 关键词 (`file`, `struct`, `enum`, `bitfield`, `template`, `variant`, `let`, `in`, `new`, `@block`, `@each`, `@echo`, `@write`, `@checksum`, `@crc32`, `@align`, `@bswap16`, `@bswap32`, `@select`), 属性键 (`count`, `if`, `validate`, `endian`, `checksum`, `le`, `be`)
+- [x] **关键字补全** — 41 个 token: 关键词(11) + 类型(13) + 属性(7) + builtin(10)
+- [ ] **上下文补全** — `@` 后只补全 builtins, `[...` 内只补全属性键
+- [ ] **诊断位置优化** — Syntax_error 使用 AST loc 而非 lexbuf 位置
