@@ -12,6 +12,8 @@ type loc = {
 
 type identifier = string
 
+let current_id = "_"
+
 type binary_op = Add | Sub | Mul | Div | Mod | Eq | Neq | Lt | Le | Gt | Ge | And | Or
                | BitAnd | BitOr | BitXor | LShift | RShift
 type unary_op = Neg | Not | BitNot

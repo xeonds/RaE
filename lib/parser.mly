@@ -264,13 +264,13 @@ postfix_expr:
 
 primary_expr:
   | DOT IDENT
-    { FieldAccess(Ident("_", mk_loc $startpos $endpos), $2, mk_loc $startpos $endpos) }
+    { FieldAccess(Ident(Ast.current_id, mk_loc $startpos $endpos), $2, mk_loc $startpos $endpos) }
   | DOT LBRACK RBRACK
-    { FuncCall("expand", [Ident("_", mk_loc $startpos $endpos)], mk_loc $startpos $endpos) }
+    { FuncCall("expand", [Ident(Ast.current_id, mk_loc $startpos $endpos)], mk_loc $startpos $endpos) }
   | DOT LBRACK idx = expr RBRACK
-    { ArrayAccess(Ident("_", mk_loc $startpos $endpos), idx, mk_loc $startpos $endpos) }
+    { ArrayAccess(Ident(Ast.current_id, mk_loc $startpos $endpos), idx, mk_loc $startpos $endpos) }
   | DOT
-    { Ident("_", mk_loc $startpos $endpos) }
+    { Ident(Ast.current_id, mk_loc $startpos $endpos) }
   | i = INT
     { IntLit(i, mk_loc $startpos $endpos) }
   | f = FLOAT

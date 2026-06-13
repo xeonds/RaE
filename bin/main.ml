@@ -43,22 +43,9 @@ let parse_and_run config =
       Engine.set_construct_defs all_defs;
       let result = Engine.eval_actions program.actions call_env root in
       (match config.Engine.output with
-       | Some filename ->
-         (match result with
-          | Ast.VBytes b -> let oc = open_out_bin filename in output oc b 0 (Bytes.length b); close_out oc
-          | _ -> ())
+       | Some filename -> (match result with Ast.VBytes b -> let oc = open_out_bin filename in output oc b 0 (Bytes.length b); close_out oc | _ -> ())
        | None -> ());
-      begin match result with
-      | Ast.VInt n -> Printf.printf "%d\n" n
-      | Ast.VInt32 n -> Printf.printf "%ld\n" n
-      | Ast.VInt64 n -> Printf.printf "%Ld\n" n
-      | Ast.VFloat f -> Printf.printf "%f\n" f
-      | Ast.VString s -> Printf.printf "%s\n" s
-      | Ast.VBytes _ -> Printf.printf "<bytes>\n"
-      | Ast.VArray items -> Printf.printf "<array %d>\n" (List.length items)
-      | Ast.VObj fields -> Printf.printf "<obj %d>\n" (List.length fields)
-      | Ast.VNull -> ()
-      end
+      Printf.printf "%s\n" (Engine.format_value result)
   with
   | Lexer.SyntaxError msg ->
     Printf.eprintf "Lexical error: %s\n" msg;
