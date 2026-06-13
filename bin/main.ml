@@ -1,72 +1,64 @@
 open Rae_lib
-open Types
-open Binary_parser
 
-(* parse the binary data with program *)
-let process_binary_data bin program =
-  (* TODO: support multi scheme headers parse *)
-  let parsed = BinaryParser.parse_file bin (List.nth program.file_defs 0) in
-  match parsed with
-  | Ok parsed -> 
-      let value = Interpreter.value_of_parsed_file parsed in
-      Interpreter.eval_actions [((List.nth program.file_defs 0).name, value)] program.actions
-  | Error (msg, _) ->
-      Printf.fprintf stderr "Error parsing binary data: %s\n" msg;;
-
-let parse_and_run script =
-  let lexbuf = ref None in
+let parse_and_run config =
   try
-    (* Process the scheme source *)
-    let scheme_content = match script.scheme with
-      | File filename -> Script_parser.parse_script_file filename
-      | Inline content -> content
+    let source =
+      match config.Engine.scheme with
+      | Engine.File filename -> Engine.parse_script_file filename
+      | Engine.Inline content -> content
     in
-    
-    (* Process imports and parse the complete scheme *)
-    let processed_scheme = Interpreter.process_imports scheme_content in
-    lexbuf := Some (Lexing.from_string processed_scheme);
-    let program = Parser.program Lexer.token (Option.get !lexbuf) in
+    let processed = Engine.process_imports source in
+    let lexbuf = Lexing.from_string processed in
+    let program = Parser.program Lexer.token lexbuf in
+    let bytes = Engine.read_binary_file config.Engine.binary_file in
 
-    (* Read the binary file *)
-    let bytes = Interpreter.read_binary_file script.binary_file in
-    
-    (* Process the binary file with the parsed program *)
-    process_binary_data bytes program
-    
+    match program.files with
+    | [] ->
+      Printf.eprintf "No file schema defined\n";
+      exit 1
+    | file_schema :: _ ->
+      let env = Engine.parse_binary file_schema bytes in
+      let root = Ast.VObj env in
+      let call_env = ["__raw__", Ast.VBytes bytes] in
+      let result = Engine.eval_actions program.actions call_env root in
+      begin match result with
+      | Ast.VInt n -> Printf.printf "%d\n" n
+      | Ast.VInt32 n -> Printf.printf "%ld\n" n
+      | Ast.VInt64 n -> Printf.printf "%Ld\n" n
+      | Ast.VFloat f -> Printf.printf "%f\n" f
+      | Ast.VString s -> Printf.printf "%s\n" s
+      | Ast.VBytes _ -> Printf.printf "<bytes>\n"
+      | Ast.VArray items -> Printf.printf "<array %d>\n" (List.length items)
+      | Ast.VObj fields -> Printf.printf "<obj %d>\n" (List.length fields)
+      | Ast.VNull -> ()
+      end
   with
-  | Lexer.LexError msg ->
-      Printf.fprintf stderr "Lexical error: %s\n" msg;
-      exit 1
+  | Lexer.SyntaxError msg ->
+    Printf.eprintf "Lexical error: %s\n" msg;
+    exit 1
   | Parser.Error ->
-      let pos = Lexing.lexeme_start_p (Option.get !lexbuf) in
-      Printf.fprintf stderr "Syntax error at line %d, column %d\n" pos.pos_lnum (pos.pos_cnum - pos.pos_bol + 1);
-      exit 1
-  | Script_parser.Script_error msg ->
-      Printf.fprintf stderr "Script error: %s\n" msg;
-      exit 1
+    Printf.eprintf "Syntax error\n";
+    exit 1
+  | Engine.Engine_error msg ->
+    Printf.eprintf "Engine error: %s\n" msg;
+    exit 1
   | e ->
-      Printf.fprintf stderr "Unexpected error: %s\n" (Printexc.to_string e);
-      exit 1
+    Printf.eprintf "Error: %s\n" (Printexc.to_string e);
+    exit 1
 
 let print_usage () =
   Printf.printf "Usage:\n";
   Printf.printf "  rae <script.RaE> <binary_file>\n";
-  Printf.printf "  rae \"<scheme or import statement>\" <binary_file>\n";
-  Printf.printf "Or use as a shebang script:\n";
-  Printf.printf "  ./script.rae <binary_file>\n"
+  Printf.printf "  rae \"<scheme content>\" <binary_file>\n"
 
 let () =
   match Array.length Sys.argv with
-  | 1 ->
-print_usage ()
+  | 1 -> print_usage ()
   | n when n >= 3 ->
-      let args = List.tl (Array.to_list Sys.argv) in
-      let script = Script_parser.parse_command_line args in
-      Printf.printf "Running script...\n";
-      Printf.printf "Scheme: %s\n" (match script.scheme with File f -> f | Inline s -> s); 
-      Printf.printf "Binary file: %s\n" script.binary_file;
-      parse_and_run script
+    let args = List.tl (Array.to_list Sys.argv) in
+    let config = Engine.parse_command_line args in
+    parse_and_run config
   | _ ->
-      Printf.fprintf stderr "Invalid number of arguments\n";
-      print_usage ();
-      exit 1
+    Printf.eprintf "Invalid arguments\n";
+    print_usage ();
+    exit 1
