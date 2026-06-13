@@ -6,7 +6,3 @@
 
 ## 数组
 - [ ] **变长元素数组** — `array<bytes>` / `array<string>` stride 由 `[size = expr]` 给出
-
-## CLI
-- [ ] **stdin 支持** — `cat file.bin | rae script.rae`
-- [ ] **`-o` 输出参数**
