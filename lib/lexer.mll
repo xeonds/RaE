@@ -6,7 +6,7 @@ exception SyntaxError of string
 
 let next_line lexbuf =
   let pos = lexbuf.lex_curr_p in
-  lexbuf.lex_curr_p <- 
+  lexbuf.lex_curr_p <-
     { pos with pos_bol = lexbuf.lex_curr_pos;
                pos_lnum = pos.pos_lnum + 1
     }
@@ -24,35 +24,40 @@ rule token = parse
   | newline    { next_line lexbuf; token lexbuf }
   | "//"       { single_line_comment lexbuf }
   | "/*"       { multi_line_comment lexbuf }
-  
+
   (* Keywords *)
-  | "file"     { FILE }
-  | "struct"   { STRUCT }
-  | "enum"     { ENUM }
-  | "bitfield" { BITFIELD }
-  | "if"       { IF }
-  | "template" { TEMPLATE }
-  | "variant"  { VARIANT }
-  
+  | "file"|"FILE"   { FILE }
+  | "struct"|"STRUCT" { STRUCT }
+  | "enum"|"ENUM"     { ENUM }
+  | "bitfield"|"BITFIELD" { BITFIELD }
+  | "template"|"TEMPLATE" { TEMPLATE }
+  | "variant"|"VARIANT" { VARIANT }
+  | "after"|"AFTER"   { AFTER }
+  | "align"|"ALIGN"   { ALIGN }
+  | "count"|"COUNT"   { COUNT }
+  | "validate"|"VALIDATE" { VALIDATE }
+  | "endian"|"ENDIAN" { ENDIAN }
+  | "le"|"LE" { LEND }
+  | "be"|"BE" { BEND }
+  | "let"|"LET" { LET }
+  | "in"|"IN"   { IN }
+
+
   (* Basic Types *)
-  | "I8"       { I8 }
-  | "I16"      { I16 }
-  | "I32"      { I32 }
-  | "I64"      { I64 }
-  | "U8"       { U8 }
-  | "U16"      { U16 }
-  | "U32"      { U32 }
-  | "U64"      { U64 }
-  | "F32"      { F32 }
-  | "F64"      { F64 }
-  | "STRING"   { STRING }
-  | "BYTES"    { BYTES }
-  | "ARRAY"    { ARRAY }
-  | "HEX"      { HEX }
-  | "DEC"      { DEC }
-  | "OCT"      { OCT }
-  | "BIN"      { BIN }
-  
+  | "I8"|"i8"   { I8 }
+  | "I16"|"i16" { I16 }
+  | "I32"|"i32" { I32 }
+  | "I64"|"i64" { I64 }
+  | "U8"|"u8"   { U8 }
+  | "U16"|"u16" { U16 }
+  | "U32"|"u32" { U32 }
+  | "U64"|"u64" { U64 }
+  | "F32"|"f32" { F32 }
+  | "F64"|"f64" { F64 }
+  | "string"|"STRING" { STRING }
+  | "bytes"|"BYTES"   { BYTES }
+  | "array"|"ARRAY"   { ARRAY }
+
   (* Symbols *)
   | "{"        { LBRACE }
   | "}"        { RBRACE }
@@ -62,23 +67,27 @@ rule token = parse
   | "]"        { RBRACK }
   | "<"        { LT }
   | ">"        { GT }
+  | "=="       { EQEQ }
   | "="        { EQUAL }
   | ":"        { COLON }
   | ";"        { SEMICOLON }
   | ","        { COMMA }
   | "."        { DOT }
+  | "|"        { PIPE }
   | "@"        { AT }
   | "=>"       { FATARROW }
   | "!"        { BANG }
+  | "+"        { PLUS }
   | "-"        { MINUS }
-  
+  | "*"        { STAR }
+  | "/"        { SLASH }
+
   (* Literals *)
-  | digit+ as i     { INT(int_of_string i) }
-  | "0x" hex+ as h  { INT(int_of_string h) }
+  | "0x" hex+ as h { INT(int_of_string h) }
+  | digit+ as i    { INT(int_of_string i) }
   | digit+ "." digit+ as f { FLOAT(float_of_string f) }
   | '"' ([^'"']* as s) '"' { STRING_LIT(s) }
-  
-  (* Identifiers *)
+
   | id as text  { IDENT(text) }
   | eof         { EOF }
   | _ as c      { raise (SyntaxError ("Unexpected char: " ^ Char.escaped c)) }
