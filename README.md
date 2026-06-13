@@ -13,9 +13,12 @@ git clone https://github.com/xeonds/RaE.git && cd RaE
 opam install . --deps-only
 
 # Build & run
-dune build
-dune exec rae -- "file F { a: u8; } .a" <(printf '\x2A')   # → 42
+dune build                  # → _build/default/bin/main.exe
+dune exec rae -- ...        # build + run in one command
+dune install                # → ~/.opam/<switch>/bin/rae (on PATH)
 ```
+
+`dune build` 产物在 `_build/default/bin/main.exe`。`dune exec rae --` 自动编译后执行，无需手动找路径。`dune install` 安装到 opam 的环境 PATH 里。
 
 Or install globally:
 
