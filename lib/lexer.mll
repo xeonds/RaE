@@ -41,6 +41,7 @@ rule token = parse
   | "be"|"BE" { BEND }
   | "let"|"LET" { LET }
   | "in"|"IN"   { IN }
+  | "new"|"NEW" { NEW }
 
 
   (* Basic Types *)

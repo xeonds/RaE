@@ -20,6 +20,7 @@ let parse_and_run config =
       let env = Engine.parse_binary file_schema bytes in
       let root = Ast.VObj env in
       let call_env = ["__raw__", Ast.VBytes bytes] in
+      Engine.set_construct_defs file_schema.Ast.definitions;
       let result = Engine.eval_actions program.actions call_env root in
       begin match result with
       | Ast.VInt n -> Printf.printf "%d\n" n
@@ -35,6 +36,12 @@ let parse_and_run config =
   with
   | Lexer.SyntaxError msg ->
     Printf.eprintf "Lexical error: %s\n" msg;
+    exit 1
+  | Ast.Syntax_error (msg, loc) ->
+    let line = loc.loc_start.pos_lnum in
+    let col = loc.loc_start.pos_cnum - loc.loc_start.pos_bol in
+    let end_col = loc.loc_end.pos_cnum - loc.loc_end.pos_bol in
+    Printf.eprintf "Syntax error at line %d, col %d-%d: %s\n" line col end_col msg;
     exit 1
   | Parser.Error ->
     Printf.eprintf "Syntax error\n";

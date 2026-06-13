@@ -28,6 +28,7 @@ type expr =
   | Pipe of expr * expr * loc
   | Assign of expr * expr * loc
   | BlockLit of (identifier * expr) list * expr list * loc
+  | Construct of identifier * (identifier * expr) list * loc
 
 type block_item =
   | BLet of identifier * expr
@@ -128,3 +129,5 @@ type program = {
   actions: expr list;
   loc: loc;
 }
+
+exception Syntax_error of string * loc

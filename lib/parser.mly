@@ -6,6 +6,8 @@ let mk_loc sp ep =
                   pos_bol = sp.Lexing.pos_bol; pos_cnum = sp.Lexing.pos_cnum };
     loc_end   = { pos_fname = ep.Lexing.pos_fname; pos_lnum = ep.Lexing.pos_lnum;
                   pos_bol = ep.Lexing.pos_bol; pos_cnum = ep.Lexing.pos_cnum } }
+
+let syntax_error msg sp ep = raise (Syntax_error (msg, mk_loc sp ep))
 %}
 
 %token <string> IDENT
@@ -14,7 +16,7 @@ let mk_loc sp ep =
 %token <string> STRING_LIT
 
 %token FILE STRUCT ENUM BITFIELD TEMPLATE VARIANT
-%token AFTER ALIGN COUNT VALIDATE ENDIAN LEND BEND LET IN
+%token AFTER ALIGN COUNT VALIDATE ENDIAN LEND BEND LET IN NEW
 %token I8 I16 I32 I64 U8 U16 U32 U64 F32 F64
 %token STRING BYTES ARRAY
 %token LBRACE RBRACE LPAREN RPAREN LBRACK RBRACK
@@ -24,6 +26,11 @@ let mk_loc sp ep =
 
 %start <Ast.program> program
 
+%on_error_reduce expr assign_expr cmp_expr add_expr mul_expr unary_expr postfix_expr primary_expr
+%on_error_reduce file_def def struct_def enum_def bitfield_def template_def field_decl struct_item variant_case
+%on_error_reduce enum_member bitfield_item type_expr offset_expr attributes attribute block_item
+%on_error_reduce expects at_func_name type_params struct_condition
+
 %%
 
 (* ============== top level ============== *)
@@ -31,6 +38,8 @@ let mk_loc sp ep =
 program:
   | files = list(file_def) actions = separated_list(SEMICOLON, expr) option(SEMICOLON) EOF
     { { files; actions; loc = mk_loc $startpos $endpos } }
+  | error
+    { syntax_error "syntax error" $startpos $endpos }
   ;
 
 (* ============== file / defs / fields ============== *)
@@ -194,6 +203,7 @@ pipe_expr:
   | e = assign_expr PIPE r = pipe_expr
     { Pipe(e, r, mk_loc $startpos $endpos) }
   | e = assign_expr { e }
+  | error { syntax_error "invalid pipeline expression" $startpos $endpos }
   ;
 
 assign_expr:
@@ -268,11 +278,17 @@ primary_expr:
     { FuncCall(name, args, mk_loc $startpos $endpos) }
   | AT name = at_func_name
     { FuncCall(name, [], mk_loc $startpos $endpos) }
+  | NEW name = IDENT LBRACE fields = separated_list(COMMA, field_assign) option(COMMA) RBRACE
+    { Construct(name, fields, mk_loc $startpos $endpos) }
   ;
 
 block_item:
   | LET id = IDENT EQUAL e = expr { BLet (id, e) }
   | e = expr { BExpr e }
+  ;
+
+field_assign:
+  | name = IDENT EQUAL value = expr { (name, value) }
   ;
 
 at_func_name:
