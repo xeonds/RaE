@@ -1,142 +1,22 @@
 open Ast
-open Binlib
 
-exception Engine_error of string
-
-(* env is for saving states when parsing content *)
-type env = (string * data_type) list
-
-(* 定义记录类型和输入方案类型 *)
-type input_scheme =
-  | File of string
-  | Inline of string
+type input_scheme = File of string | Inline of string
 
 type config = {
   scheme: input_scheme;
   binary_file: string;
 }
 
-(* engine has 2 parts *)
-(* one is engine for parse the bin data according to the ast.file *)
-(* another is engine for evaluating all expressions *)
+exception Engine_error of string
 
-(* attach binary flow to given ast *)
-let eval_file_ast ast data = 
-  (* recursively parse the file's definations and fields *)
-  (* a def is a struct shows that how some fields are composed *)
-  (* let rec eval_defs defs env = 
-    | [] -> xxx
-    | item::rest -> 
-        let res = match item with
-          | StructDef s ->
-          | EnumDef e ->
-          | BitFieldDef b ->
-          | TemplateDef t ->
-        in
-        [res::(eval_file_ast rest env)]
-  in *)
-  let rec eval_field field data env = match field with
-    | [] -> []
-    | item::rest -> 
-        let len = Binlib.sizeof item in
-        let data_block = Binlib.pick data len in
-        let res = Binlib.parse_data (item, data_block)
-        in
-        res :: (eval_field rest (Binlib.shift data len) env)
-  in
-  let rec eval_fields fields data env =
-    (* TODO: parse offset expr to support all 4 types of offset *)
-    let rec eval_offset_expr offset_expr = match offset_expr with
-      | Fixed e -> e 
-      | After _id -> 0
-      | Align _e -> 0
-      | Dynamic _e -> 0
-    in
-    match fields with
-    | [] -> []
-    | field::rest ->
-        let offset = eval_offset_expr field.offset in
-        let data_block = Binlib.substring data offset (Binlib.sizeof field.field_type) in
-        let res = eval_field [field.field_type] data_block env in
-        res @ (eval_fields rest data env)
-  in
-  eval_fields ast.fields data []
+(* ---------- file I/O ---------- *)
 
-(* engine of running script part *)
-let rec eval_expr_ast exprs env = function
-  | [], _ -> ()
-  | expr::rest, _ ->
-    let env' = (match expr with
-      | IntLit (n, loc) -> I8Data n
-      | Equal (e1, e2) ->
-          let v1 = eval_expr_ast env e1 in
-          let v2 = eval_expr_ast env e2 in
-          VBool (v1 = v2)
-      | Plus (e1, e2) ->
-          (match (eval_expr_ast env e1, eval_expr_ast env e2) with
-          | (VInt n1, VInt n2) -> VInt (n1 + n2)
-          | _ -> failwith "Type error in addition")
-      | Times (e1, e2) ->
-          (match (eval_expr_ast env e1, eval_expr_ast env e2) with
-          | (VInt n1, VInt n2) -> VInt (n1 * n2)
-          | _ -> failwith "Type error in multiplication")
-      | Access (e, _field) ->
-          (match eval_expr_ast env e with
-          (* TODO: parse sub fields and redesign dsl structs *)
-          | ParsedFile _parsed -> eval_expr_ast env e
-              (* let field = List.find (fun f -> f.name = field) parsed.blocks in
-              (match field.value with
-              | Some bytes -> VString (Bytes.to_string bytes)
-              | None -> failwith "Field not parsed") *)
-          | _ -> failwith "Type error in field access")
-      | Let (x, expr) ->
-          let v = eval_expr_ast env expr in
-          (x, v) :: env
-      | If(expr, actions) -> 
-          let v = eval_expr_ast env expr in
-          (match v with
-          | VBool true -> let _ = eval_actions env actions in env
-          | VBool false -> env
-          | _ -> failwith "Type error in if condition")
-      | IfElse(expr, actions1, actions2) -> 
-        let v = eval_expr_ast env expr in
-          (match v with
-          | VBool true -> let _ = eval_actions env actions1 in env
-          | VBool false -> let _ = eval_actions env actions2 in env
-          | _ -> failwith "Type error in if condition")
-      | ForIn(x, range, actions) -> 
-        let v = List.assoc range env in
-          (match v with
-          | VInt n -> 
-              let rec loop env i =
-                if i = n then env
-                else
-                  let env' = (x, VInt i) :: env in
-                  let _ = eval_actions env' actions in
-                  loop env (i + 1)
-              in
-              loop env 0
-          | _ -> failwith "Type error in for loop")
-      | Echo s -> 
-          print_endline s;
-          env
-      | Write filename ->
-          let oc = open_out filename in
-          List.iter (fun (x, v) -> Printf.fprintf oc "%s = %s\n" x (string_of_value v)) env;
-          close_out oc;
-          env
-      | NoOp -> env) in
-    eval_expr_ast rest env'
-
-(* tools for file operation *)
-(* read file as plaintext *)
 let read_file filename =
   let ic = open_in filename in
   let content = really_input_string ic (in_channel_length ic) in
   close_in ic;
   content
 
-(* read file as binary flow *)
 let read_binary_file filename =
   let ic = open_in_bin filename in
   let len = in_channel_length ic in
@@ -145,63 +25,388 @@ let read_binary_file filename =
   close_in ic;
   bytes
 
-(* command line operation utils *)
-(* convert source code from file or stdin to plaintext *)
+(* ---------- command line ---------- *)
+
 let parse_command_line args =
   match args with
   | [script; binary_file] ->
-      (* test if the arg1 is a script file, or a script content *)
-      if Filename.check_suffix script ".RaE" || Filename.check_suffix script ".rae" then
-        { scheme = File script; binary_file }
-      else
-        { scheme = Inline script; binary_file }
+    if Filename.check_suffix script ".RaE" || Filename.check_suffix script ".rae" then
+      { scheme = File script; binary_file }
+    else
+      { scheme = Inline script; binary_file }
   | _ ->
-      raise (Failure "Invalid arguments. Usage: rae <script.RaE | \"scheme\"> <binary_file>")
-
-let parse_source = function
-  | File filename -> read_file filename
-  | Inline content -> content
+    raise (Failure "Usage: rae <script.RaE | \"scheme\"> <binary_file>")
 
 let parse_script_file filename =
   let content = read_file filename in
   let is_shebang_line str =
     String.length str >= 2 && String.sub str 0 2 = "#!"
   in
-  let trim_shebang content =
-    let lines = String.split_on_char '\n' content in
-    match lines with
-    | first :: rest when is_shebang_line first ->
-        String.concat "\n" rest
-    | _ -> content
-  in
   if is_shebang_line content then
-    trim_shebang content
-  else
-    content
+    let lines = String.split_on_char '\n' content in
+    (match lines with first :: rest when is_shebang_line first ->
+      String.concat "\n" rest
+    | _ -> content)
+  else content
 
-(* preprocess source code *)
 let process_imports content =
-  let import_scheme filename =
-    try 
-      read_file filename
-    with _ -> 
-      failwith (Printf.sprintf "Failed to import scheme from '%s'" filename)
+  let import_re = Str.regexp "import '[^']*'" in
+  let rec find_all acc pos =
+    try
+      let _ = Str.search_forward import_re content pos in
+      let matched = Str.matched_string content in
+      let filename = String.sub matched 8 (String.length matched - 9) in
+      find_all (filename :: acc) (Str.match_end())
+    with Not_found -> List.rev acc
   in
-  let extract_imports content =
-    let import_re = Str.regexp "import '[^']*'" in
-    let rec find_all acc pos =
-      try
-        let _ = Str.search_forward import_re content pos in
-        let matched = Str.matched_string content in
-        let filename = String.sub matched 8 (String.length matched - 9) in
-        find_all (filename :: acc) (Str.match_end())
-      with Not_found -> 
-        List.rev acc
-    in
-    find_all [] 0
-  in
-  let imports = extract_imports content in
+  let imports = find_all [] 0 in
   List.fold_left (fun acc filename ->
-    let imported = import_scheme filename in
+    let imported = read_file filename in
     acc ^ "\n" ^ imported
   ) content imports
+
+(* ---------- expression evaluation (must come before binary parsing) ---------- *)
+
+let value_to_bytes v =
+  match v with
+  | VBytes b -> b
+  | VString s -> Bytes.of_string s
+  | VInt n -> Bytes.of_string (string_of_int n)
+  | VInt32 n -> Bytes.of_string (Int32.to_string n)
+  | VInt64 n -> Bytes.of_string (Int64.to_string n)
+  | VArray items ->
+    let buf = Buffer.create 64 in
+    List.iter (fun item -> match item with
+      | VInt n -> Buffer.add_string buf (string_of_int n)
+      | VInt32 n -> Buffer.add_string buf (Int32.to_string n)
+      | VInt64 n -> Buffer.add_string buf (Int64.to_string n)
+      | VString s -> Buffer.add_string buf s
+      | _ -> ()) items;
+    Bytes.of_string (Buffer.contents buf)
+  | VObj fields ->
+    let buf = Buffer.create 128 in
+    List.iter (fun (k, v) ->
+      Buffer.add_string buf k;
+      Buffer.add_string buf "=";
+      match v with VInt n -> Buffer.add_string buf (string_of_int n) | VString s -> Buffer.add_string buf s | _ -> ()
+    ) (List.rev fields);
+    Bytes.of_string (Buffer.contents buf)
+  | VNull -> Bytes.of_string "null"
+  | VFloat f -> Bytes.of_string (string_of_float f)
+
+let rec eval_expr expr env current =
+  match expr with
+  | IntLit (n, _) -> VInt n
+  | FloatLit (f, _) -> VFloat f
+  | StringLit (s, _) -> VString s
+  | Ident (id, _) ->
+    (match id with
+     | "_" -> current
+     | _ ->
+       let from_current = match current with
+         | VObj fields -> (try Some (List.assoc id fields) with Not_found -> None)
+         | _ -> None
+       in
+       (match from_current with
+        | Some v -> v
+        | None -> (try List.assoc id env with Not_found -> VNull)))
+  | BinaryOp (op, e1, e2, _) ->
+    let v1 = eval_expr e1 env current in
+    let v2 = eval_expr e2 env current in
+    eval_binary_op op v1 v2
+  | FieldAccess (e, f, _) ->
+    let v = eval_expr e env current in
+    (match v with
+     | VObj fields ->
+       (try List.assoc f fields with Not_found -> VNull)
+     | VArray items ->
+       VArray (List.map (fun item ->
+         (match item with
+          | VObj fields -> (try List.assoc f fields with Not_found -> VNull)
+          | _ -> VNull)
+       ) items)
+     | _ -> VNull)
+  | ArrayAccess (e, idx, _) ->
+    let v = eval_expr e env current in
+    let i = eval_expr idx env current in
+    (match v, i with
+     | VArray items, VInt n -> (try List.nth items n with Failure _ -> VNull)
+     | _ -> VNull)
+  | FuncCall (name, args, _) ->
+    eval_builtin name args env current
+  | Pipe (e1, e2, _) ->
+    let v = eval_expr e1 env current in
+    eval_expr e2 env v
+  | BlockLit (lets, body, _) ->
+    let env' = List.fold_left (fun env (id, e) ->
+      (id, eval_expr e env current) :: env
+    ) env lets in
+    (match List.rev body with
+     | [] -> VNull
+     | last :: rest ->
+       List.iter (fun e -> ignore (eval_expr e env' current)) (List.rev rest);
+       eval_expr last env' current)
+  | Assign _ -> VNull
+  | UnaryOp _ -> VNull
+
+and eval_binary_op op v1 v2 =
+  match op, v1, v2 with
+  | Add, VInt a, VInt b -> VInt (a + b)
+  | Sub, VInt a, VInt b -> VInt (a - b)
+  | Mul, VInt a, VInt b -> VInt (a * b)
+  | Div, VInt a, VInt b -> VInt (a / b)
+  | Add, VInt32 a, VInt32 b -> VInt32 (Int32.add a b)
+  | Sub, VInt32 a, VInt32 b -> VInt32 (Int32.sub a b)
+  | Mul, VInt32 a, VInt32 b -> VInt32 (Int32.mul a b)
+  | Div, VInt32 a, VInt32 b -> VInt32 (Int32.div a b)
+  | Add, VInt64 a, VInt64 b -> VInt64 (Int64.add a b)
+  | Sub, VInt64 a, VInt64 b -> VInt64 (Int64.sub a b)
+  | Mul, VInt64 a, VInt64 b -> VInt64 (Int64.mul a b)
+  | Div, VInt64 a, VInt64 b -> VInt64 (Int64.div a b)
+  | Eq, VInt a, VInt b -> VInt (if a = b then 1 else 0)
+  | Lt, VInt a, VInt b -> VInt (if a < b then 1 else 0)
+  | Gt, VInt a, VInt b -> VInt (if a > b then 1 else 0)
+  | Eq, VInt32 a, VInt32 b -> VInt (if a = b then 1 else 0)
+  | Lt, VInt32 a, VInt32 b -> VInt (if a < b then 1 else 0)
+  | Eq, VInt64 a, VInt64 b -> VInt (if a = b then 1 else 0)
+  | Eq, VString a, VString b -> VInt (if a = b then 1 else 0)
+  | _ -> VNull
+
+and eval_builtin name args env current =
+  match name, args with
+  | "expand", [e] ->
+    let v = eval_expr e env current in
+    (match v with VArray items -> VArray items | _ -> VArray [v])
+  | "select", [e] ->
+    (match current with
+     | VArray items ->
+       VArray (List.filter (fun item ->
+         match eval_expr e env item with
+         | VInt 0 -> false
+         | _ -> true
+       ) items)
+     | _ -> current)
+  | "echo", [e] ->
+    let v = eval_expr e env current in
+    (match v with
+     | VInt n -> Printf.printf "%d\n" n
+     | VInt32 n -> Printf.printf "%ld\n" n
+     | VInt64 n -> Printf.printf "%Ld\n" n
+     | VFloat f -> Printf.printf "%f\n" f
+     | VString s -> Printf.printf "%s\n" s
+     | VBytes b -> Printf.printf "%s\n" (Bytes.to_string b)
+     | VArray items ->
+       Printf.printf "[";
+       List.iteri (fun i item ->
+         if i > 0 then Printf.printf ", ";
+         match item with VInt n -> Printf.printf "%d" n | VInt32 n -> Printf.printf "%ld" n | VString s -> Printf.printf "%s" s | _ -> Printf.printf "?")
+         items;
+       Printf.printf "]\n"
+     | VObj fields -> Printf.printf "<obj %d>\n" (List.length fields)
+     | VNull -> Printf.printf "null\n");
+    current
+  | "align", [e; n] ->
+    let v = eval_expr e env current in
+    let a = eval_expr n env current in
+    (match v, a with
+     | VInt x, VInt y -> VInt ((x + y - 1) / y * y)
+     | _ -> VNull)
+  | "each", [Ident (varname, _); arr; blk] ->
+    let arr_val = eval_expr arr env current in
+    (match arr_val with
+     | VArray items ->
+       VArray (List.map (fun item ->
+         eval_expr blk ((varname, item) :: env) item
+       ) items)
+     | _ -> VNull)
+  | "checksum", [e] ->
+    let v = eval_expr e env current in
+    let bytes = value_to_bytes v in
+    let sum = ref 0 in for i = 0 to Bytes.length bytes - 1 do sum := !sum + Char.code (Bytes.get bytes i) done;
+    VInt (!sum land 0xFFFF)
+  | "checksum", [] ->
+    let bytes = value_to_bytes current in
+    let sum = ref 0 in for i = 0 to Bytes.length bytes - 1 do sum := !sum + Char.code (Bytes.get bytes i) done;
+    VInt (!sum land 0xFFFF)
+  | "write", [e] ->
+    let v = eval_expr e env current in
+    (match v with
+     | VString filename ->
+       let bytes = match List.assoc "__raw__" env with
+         | VBytes b -> b | _ -> Bytes.empty
+       in
+       let oc = open_out_bin filename in
+       output oc bytes 0 (Bytes.length bytes);
+       close_out oc;
+       VInt 0
+     | _ -> VNull)
+  | "object", _ -> VObj []
+  | _ -> VNull
+
+and eval_actions actions env current =
+  match List.rev actions with
+  | [] -> VNull
+  | [single] -> eval_expr single env current
+  | last :: rest ->
+    List.iter (fun a -> ignore (eval_expr a env current)) (List.rev rest);
+    eval_expr last env current
+
+let values_equal a b =
+  match a, b with
+  | VInt x, VInt y -> x = y
+  | VInt32 x, VInt32 y -> x = y
+  | VInt64 x, VInt64 y -> x = y
+  | VFloat x, VFloat y -> x = y
+  | VString x, VString y -> x = y
+  | VInt32 x, VInt y -> Int32.to_int x = y
+  | VInt x, VInt32 y -> x = Int32.to_int y
+  | VInt64 x, VInt y -> Int64.to_int x = y
+  | VInt x, VInt64 y -> x = Int64.to_int y
+  | _ -> false
+
+(* ---------- schema evaluation: parse binary into structured value ---------- *)
+
+let compute_offset offset_expr prev_offset base_offset env field_ends =
+  match offset_expr with
+  | Fixed n -> base_offset + n
+  | After name ->
+    (try List.assoc name field_ends with Not_found -> prev_offset)
+  | Align e ->
+    let n = match eval_expr e env VNull with VInt n -> n | _ -> 1 in
+    ((prev_offset + n - 1) / n) * n
+  | Dynamic e ->
+    match eval_expr e env VNull with VInt n -> n | _ -> prev_offset
+
+let size_of_type = function
+  | I8 | U8 -> 1
+  | I16 | U16 -> 2
+  | I32 | U32 | F32 -> 4
+  | I64 | U64 | F64 -> 8
+  | StringType _ -> 0
+  | BytesType _ -> 0
+  | ArrayType _ -> 0
+  | StructType _ -> 0
+  | TemplateType _ -> 0
+
+let field_endian attrs =
+  List.fold_left (fun acc attr ->
+    match attr with Ast.Endian (k, _) -> Some k | _ -> acc
+  ) None attrs
+
+let read_uint data offset size endian =
+  let acc = ref 0 in
+  for i = 0 to size - 1 do
+    let pos = match endian with
+      | Some BE -> offset + size - 1 - i
+      | _ -> offset + i
+    in
+    acc := !acc lor ((Char.code (Bytes.get data pos)) lsl (8 * i))
+  done;
+  !acc
+
+let parse_value typ data endian =
+  match typ with
+  | I8 | U8 -> VInt (Char.code (Bytes.get data 0))
+  | I16 | U16 -> VInt (read_uint data 0 2 endian)
+  | I32 | U32 | F32 -> VInt32 (Int32.of_int (read_uint data 0 4 endian))
+  | I64 | U64 | F64 -> VInt64 (Int64.of_int (read_uint data 0 8 endian))
+  | StringType _ -> VString (Bytes.to_string data)
+  | BytesType _ -> VBytes data
+  | _ -> VObj []
+
+let parse_field_bytes typ endian data offset =
+  let size = size_of_type typ in
+  let buf = Bytes.sub data offset size in
+  parse_value typ buf endian
+
+let rec lookup_struct name defs =
+  match defs with
+  | [] -> raise (Engine_error (Printf.sprintf "Struct '%s' not found" name))
+  | (Ast.StructDef s) :: _ when s.name = name ->
+    let members = List.filter_map (function Ast.Field f -> Some f | _ -> None) s.members in
+    if members = [] then
+      raise (Engine_error (Printf.sprintf "Struct '%s' has no fields" name));
+    members
+  | _ :: rest -> lookup_struct name rest
+
+let parse_binary schema bytes =
+  let struct_registry = schema.definitions in
+  let rec parse_fields fields data base_offset prev_offset env field_ends =
+    match fields with
+    | [] -> (env, prev_offset, field_ends)
+    | f :: rest ->
+      let offset = compute_offset f.offset prev_offset base_offset env field_ends in
+      let endian = field_endian f.attributes in
+      let val_ = parse_field f data offset endian in
+      let size = size_of_field f data offset in
+      let new_env = (f.name, val_) :: env in
+      let new_ends = (f.name, offset + size) :: field_ends in
+      (match f.expects with
+       | Some e ->
+         let expected = eval_expr e new_env VNull in
+         if not (values_equal val_ expected) then
+           raise (Engine_error (Printf.sprintf "Field '%s' expected value doesn't match" f.name))
+       | None -> ());
+      parse_fields rest data base_offset (offset + size) new_env new_ends
+  and parse_field f data offset endian =
+    match f.field_type with
+    | Ast.StructType name ->
+      let members = lookup_struct name struct_registry in
+      let struct_env, _, _ = parse_fields members data offset offset [] [] in
+      VObj struct_env
+    | Ast.ArrayType elem_type ->
+      let count = ref 1 in
+      List.iter (fun attr ->
+        match attr with Ast.Count (expr, _) ->
+          (match eval_expr expr [] VNull with VInt n -> count := n | _ -> ())
+        | _ -> ()
+      ) f.attributes;
+      let elems = ref [] in
+      let off = ref offset in
+      for _i = 1 to !count do
+        let v = match elem_type with
+          | Ast.StructType name ->
+            let members = lookup_struct name struct_registry in
+            let env, _, _ = parse_fields members data !off !off [] [] in
+            VObj env
+          | _ -> parse_field_bytes elem_type endian data !off
+        in
+        elems := v :: !elems;
+        off := !off + (match elem_type with
+          | Ast.StructType name ->
+            let members = lookup_struct name struct_registry in
+            let _, fo, _ = parse_fields members data !off !off [] [] in
+            fo - !off
+          | _ -> size_of_type elem_type)
+      done;
+      VArray (List.rev !elems)
+    | _ -> parse_field_bytes f.field_type endian data offset
+  and size_of_field f data offset =
+    match f.field_type with
+    | Ast.StructType name ->
+      let members = lookup_struct name struct_registry in
+      let _, final_offset, _ = parse_fields members data offset offset [] [] in
+      final_offset - offset
+    | Ast.ArrayType elem_type ->
+      let count = ref 1 in
+      List.iter (fun attr ->
+        match attr with Ast.Count (expr, _) ->
+          (match eval_expr expr [] VNull with VInt n -> count := n | _ -> ())
+        | _ -> ()
+      ) f.attributes;
+      let elem_size = match elem_type with
+        | Ast.StructType name ->
+          let members = lookup_struct name struct_registry in
+          let _, fo, _ = parse_fields members data offset offset [] [] in
+          fo - offset
+        | _ -> size_of_type elem_type
+      in
+      (!count) * elem_size
+    | StringType _ | BytesType _ ->
+      (match List.find_map (fun attr -> match attr with Ast.Count (IntLit (n, _), _) -> Some n | _ -> None) f.attributes with
+       | Some n -> n
+       | None -> Bytes.length data - offset)
+    | _ -> size_of_type f.field_type
+  in
+  let env, _, _ = parse_fields schema.fields bytes 0 0 [] [] in
+  env
