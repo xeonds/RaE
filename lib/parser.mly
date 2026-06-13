@@ -6,8 +6,6 @@ let mk_loc sp ep =
                   pos_bol = sp.Lexing.pos_bol; pos_cnum = sp.Lexing.pos_cnum };
     loc_end   = { pos_fname = ep.Lexing.pos_fname; pos_lnum = ep.Lexing.pos_lnum;
                   pos_bol = ep.Lexing.pos_bol; pos_cnum = ep.Lexing.pos_cnum } }
-
-let syntax_error msg sp ep = raise (Syntax_error (msg, mk_loc sp ep))
 %}
 
 %token <string> IDENT
@@ -27,11 +25,6 @@ let syntax_error msg sp ep = raise (Syntax_error (msg, mk_loc sp ep))
 
 %start <Ast.program> program
 
-%on_error_reduce expr assign_expr cmp_expr add_expr mul_expr unary_expr postfix_expr primary_expr
-%on_error_reduce file_def def struct_def enum_def bitfield_def template_def field_decl struct_item variant_case
-%on_error_reduce enum_member bitfield_item type_expr offset_expr attributes attribute block_item
-%on_error_reduce expects at_func_name type_params struct_condition
-
 %%
 
 (* ============== top level ============== *)
@@ -39,8 +32,6 @@ let syntax_error msg sp ep = raise (Syntax_error (msg, mk_loc sp ep))
 program:
   | files = list(file_def) actions = separated_list(SEMICOLON, expr) option(SEMICOLON) EOF
     { { files; actions; loc = mk_loc $startpos $endpos } }
-  | error
-    { syntax_error "syntax error" $startpos $endpos }
   ;
 
 (* ============== file / defs / fields ============== *)
@@ -211,7 +202,6 @@ pipe_expr:
   | e = assign_expr PIPE r = pipe_expr
     { Pipe(e, r, mk_loc $startpos $endpos) }
   | e = assign_expr { e }
-  | error { syntax_error "invalid pipeline expression" $startpos $endpos }
   ;
 
 assign_expr:

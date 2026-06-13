@@ -15,22 +15,37 @@
 | [`archive-inspect`](./archive-inspect/SKILL.md) | ZIP/TAR/GZIP/7z 头与条目列表 | 完整解压（用 unzip/tar CLI）、DEB/RPM |
 | [`network-protocol`](./network-protocol/SKILL.md) | PCAP/PCAPNG/IPv4/IPv6/TCP/UDP/DNS | HTTP/TLS/QUIC、实时抓包、加密 payload |
 
+## 当前 RaE 能力速查
+
+**已实现**（上次更新后新增的）：
+
+- 位运算：`& ^ << >>` 和一元 `~`（`engine.ml:209-220`）
+- 完整比较运算符：`== != < <= > >=`
+- 逻辑 `&&` `||`、`!`
+- 自动 offset：字段不写 `@` 默认 `After ""` 顺序堆叠（`parser.mly:131-138`）
+- `[checksum = expr]` 字段 attr：`construct_binary` 时按 expr 写入 CRC32
+- `@crc32(v)` 内置函数（`engine.ml:248-249`）
+- `@bswap16` / `@bswap32` 内置函数
+- 多形参模板：`template<T, U>`
+- stdin 输入 / `-o` 输出参数
+- `@write` 对 `VObj` 触发 `construct_binary` 重编码（不再"key=value 文本拼接"）
+
+**仍未实现**：
+
+- 字符串拼接运算符、字符串字面量转 int
+- 数组/对象字面量 `[1,2,3]` / `{a=1}`
+- 变长元素数组 `array<string>` / `array<bytes>` 的 stride
+- 压缩/解压 DEFLATE/LZMA
+- 实时 stdin 持续流（只能一次性读到 EOF）
+- `@ (expr)` 动态偏移 env 仍为空，不能引用同 struct 兄弟字段（`engine.ml:346`）
+
 ## 写新 skill 的建议
 
 如果发现新场景但本目录没有覆盖，参考现有 skill 的结构：
 
 1. 何时使用 / 不适用
 2. 最小事实（写 schema 前要知道的关键字段与字节序）
-3. 最小可运行 schema
+3. 最小可运行 schema（尽量用自动 offset）
 4. 典型任务模板（每个任务一段：场景 + schema + 表达式）
 5. 常见坑（endian、可变长、校验和、位域等 RaE 当前限制）
 6. 与其它 skill 的边界
-
-## 已知 RaE 限制（影响所有 skill）
-
-- 表达式仅 `+ - * / == < >`，**无位运算、无字符串拼接、无数组字面量**
-- `@write` 不会按 schema 重新编码 `VObj`；要"修改后落盘"必须 `new T {...}` 得 `VBytes` 再写
-- 校验和：仅 16 位 byte sum（`@checksum`），无 CRC32/MD5/SHA1
-- 动态偏移 `@ (expr)` 不能引用同 struct 内其他字段
-- 压缩/解压：`new` 不执行 DEFLATE/LZMA；需要外部 CLI 配合
-- 数组元素大小：`array<T>` 的 T 必须是定长结构体

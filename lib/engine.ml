@@ -286,14 +286,14 @@ and construct_binary name field_vals struct_defs =
   let cur_off = ref 0 in
   List.iter (fun f ->
     let sz = size_of_type f.field_type in
-    let off = match f.offset with Fixed n -> n | After _ -> !cur_off | _ -> 0 in
+    let off = match f.offset with Fixed n -> n | After _ | Dynamic _ | Align _ -> !cur_off in
     total := max !total (off + sz);
     cur_off := off + sz) info.fields;
   let buf = Bytes.make !total '\000' in
   cur_off := 0;
   let checksum_fields = ref [] in
   List.iter (fun f ->
-    let offset = match f.offset with Fixed n -> n | After _ -> !cur_off | _ -> 0 in
+    let offset = match f.offset with Fixed n -> n | After _ | Dynamic _ | Align _ -> !cur_off in
     (match List.find_map (fun attr -> match attr with Ast.Checksum (_, _) -> Some offset | _ -> None) f.attributes with
      | Some cs_off -> checksum_fields := (cs_off, f) :: !checksum_fields
      | None -> ());
@@ -324,8 +324,9 @@ and construct_binary name field_vals struct_defs =
 and eval_actions actions env current_val =
   let cur = ref current_val in
   match List.rev actions with
-  | [] -> VNull | last :: rest ->
-    List.iter (fun a -> ignore (eval_expr a env cur)) (List.rev rest);
+  | [] -> VNull
+  | last :: rev_rest ->
+    List.iter (fun a -> ignore (eval_expr a env cur)) rev_rest;
     eval_expr last env cur
 
 let values_equal a b = match a, b with

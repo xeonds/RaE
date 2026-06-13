@@ -19,23 +19,28 @@ let create_state () = {
 }
 
 let parse_document text =
+  let lexbuf = Lexing.from_string text in
+  let pos_to_range (p_start : Lexing.position) (p_end : Lexing.position) =
+    { start_ = { line = p_start.pos_lnum - 1; character = p_start.pos_cnum - p_start.pos_bol };
+      end_   = { line = p_end.pos_lnum - 1; character = p_end.pos_cnum - p_end.pos_bol } }
+  in
   try
-    let lexbuf = Lexing.from_string text in
     let _ = Parser.program Lexer.token lexbuf in
     []
   with
   | Ast.Syntax_error (msg, loc) ->
-    let range = range_of_loc loc in
-    [{ range; severity = 1; message = msg }]
+    [{ range = range_of_loc loc; severity = 1; message = msg }]
   | Parser.Error ->
-    [{ range = { start_ = { line = 0; character = 0 }; end_ = { line = 0; character = 0 } };
-       severity = 1; message = "Syntax error" }]
+    let p_start = lexbuf.lex_start_p in
+    let p_end = lexbuf.lex_curr_p in
+    let r = pos_to_range p_start p_end in
+    [{ range = r; severity = 1; message = "Syntax error" }]
   | Lexer.SyntaxError msg ->
-    [{ range = { start_ = { line = 0; character = 0 }; end_ = { line = 0; character = 0 } };
-       severity = 1; message = Printf.sprintf "Lexical error: %s" msg }]
+    let r = pos_to_range lexbuf.lex_start_p lexbuf.lex_curr_p in
+    [{ range = r; severity = 1; message = Printf.sprintf "Lexical error: %s" msg }]
   | _ ->
-    [{ range = { start_ = { line = 0; character = 0 }; end_ = { line = 0; character = 0 } };
-       severity = 1; message = "Unknown error" }]
+    let r = pos_to_range lexbuf.lex_start_p lexbuf.lex_curr_p in
+    [{ range = r; severity = 1; message = "Unknown error" }]
 
 let diagnostics_to_json diags =
   `List (List.map (fun d ->

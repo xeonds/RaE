@@ -1,6 +1,6 @@
 ---
 name: network-protocol
-description: Use this skill whenever the user wants to inspect, dissect, or modify network protocol packets or captures using RaE — including PCAP, PCAPNG, DNS messages, IPv4/IPv6, TCP/UDP headers, and common L2/L3/L4 fields. Triggers on "解析 pcap", "读 DNS 应答", "改 IP 头", "看 TCP flags", "extract HTTP from pcap", "PCAPNG block", "DNS query parsing". Do NOT use for application-layer protocol bodies (HTTP, TLS, MQTT) — use a dedicated protocol skill for those. Also NOT for live packet capture (use tcpdump) or for analyzing encrypted payloads.
+description: Use this skill whenever the user wants to inspect, dissect, or modify network protocol packets or captures using RaE — including PCAP, PCAPNG, DNS messages, IPv4/IPv6, TCP/UDP headers, and common L2/L3/L4 fields. Triggers on "解析 pcap", "读 DNS 应答", "改 IP 头", "看 TCP flags", "extract HTTP from pcap", "PCAPNG block", "DNS query parsing", "TCP checksum", "IPv4 version". Do NOT use for application-layer protocol bodies (HTTP, TLS, MQTT) — use a dedicated protocol skill for those. Also NOT for live packet capture (use tcpdump) or for analyzing encrypted payloads.
 ---
 
 # Network Protocol Inspection with RaE
@@ -10,12 +10,12 @@ description: Use this skill whenever the user wants to inspect, dissect, or modi
 ## 何时使用
 
 - 解析 PCAP 文件中的 record 序列、读 linktype、timestamp、captured length
-- 解析 PCAPNG 的 block 序列（Section Header / Interface Description / Enhanced Packet / Simple Packet）
+- 解析 PCAPNG 的 block 序列
 - 解析 IPv4 头（IHL、Total Length、TTL、Protocol、Checksum、src/dst IP）
-- 解析 IPv6 头（Version、Traffic Class、Flow Label、Payload Length、Next Header、Hop Limit、src/dst）
-- 解析 TCP 头（src/dst port、seq、ack、flags、window、checksum）
-- 解析 UDP 头（src/dst port、length、checksum）
-- 解析 DNS 报文（header + question/answer/authority/additional sections）
+- 解析 IPv6 头
+- 解析 TCP 头（flags、seq/ack、window）
+- 解析 UDP 头
+- 解析 DNS 报文
 
 **不适用**：HTTP/TLS/QUIC/MQTT 完整解析（应用层）；实时抓包（用 tcpdump）；加密 payload 还原。
 
@@ -33,20 +33,20 @@ description: Use this skill whenever the user wants to inspect, dissect, or modi
 ```rae
 file PCAP {
     struct Hdr {
-        magic: u32 @ 0 [endian = le] == 0xA1B2C3D4;
-        major: u16 @ 4 [endian = le];
-        minor: u16 @ 6 [endian = le];
-        snaplen: u32 @ 16 [endian = le];
-        linktype: u32 @ 20 [endian = le];
+        magic: u32 [endian = le] == 0xA1B2C3D4;
+        major: u16 [endian = le];
+        minor: u16 [endian = le];
+        snaplen: u32 [endian = le];
+        linktype: u32 [endian = le];
     }
     struct Rec {
-        ts_sec: u32 @ 0 [endian = le];
-        ts_usec: u32 @ 4 [endian = le];
-        incl_len: u32 @ 8 [endian = le];
-        packet: bytes @ 16 [count = .incl_len];
+        ts_sec: u32 [endian = le];
+        ts_usec: u32 [endian = le];
+        incl_len: u32 [endian = le];
+        packet: bytes [count = .incl_len];
     }
-    hdr: Hdr @ 0;
-    recs: array<Rec> @ 24 [count = ...];
+    hdr: Hdr;
+    recs: array<Rec> [count = ...];
 }
 ```
 
@@ -60,11 +60,11 @@ file PCAP {
 
 ```rae
 struct Eth {
-    dst: bytes(6) @ 0;
-    src: bytes(6) @ 6;
-    type: u16 @ 12 [endian = be];   // 网络字节序 = 大端
+    dst: bytes(6);
+    src: bytes(6);
+    type: u16 [endian = be];   // 网络字节序 = 大端
 }
-eth: Eth @ 0;
+eth: Eth;
 ```
 
 ### 任务：链路层 type=0x0800 (IPv4) 后续
@@ -79,18 +79,17 @@ eth: Eth @ 0;
 - magic block 0x0A0D0D0A（Section Header Block，SHB）
 - Interface Description Block (IDB) = type 0x00000001
 - Enhanced Packet Block (EPB) = type 0x00000006
-- 各 block 内部是 TLV 风格（option code + length + value）
 
 最小 schema：
 
 ```rae
 file PCAPNG {
     struct Block {
-        btype: u32 @ 0 [endian = le];
-        blen: u32 @ 4 [endian = le];
-        body: bytes @ 8 [count = .blen - 12];
+        btype: u32 [endian = le];
+        blen: u32 [endian = le];
+        body: bytes [count = .blen - 12];
     }
-    blocks: array<Block> @ 0 [count = ...];
+    blocks: array<Block> [count = ...];
 }
 ```
 
@@ -104,13 +103,11 @@ variant(btype) {
 }
 ```
 
-变体里 `body` 字段按各自 btype 内的偏移再切。
-
-## IPv4 头
+## IPv4 头（位运算可用！）
 
 最小事实：
 
-- byte 0: version (high 4 bits) + IHL (low 4 bits)
+- byte 0: version (高 4 bits) + IHL (低 4 bits)
 - byte 1: DSCP + ECN
 - byte 2-3: Total Length (大端)
 - byte 4-5: Identification
@@ -120,56 +117,84 @@ variant(btype) {
 - byte 10-11: Header Checksum
 - byte 12-15: src IP
 - byte 16-19: dst IP
-- byte 20..IHL*4: options (variable, can be 0)
+- byte 20..IHL*4: options
 
-schema 写法：
-
-```rae
-struct IPv4 {
-    vihl: u8 @ 0;
-    dscpecn: u8 @ 1;
-    total_len: u16 @ 2 [endian = be];
-    ident: u16 @ 4 [endian = be];
-    flags_frag: u16 @ 6 [endian = be];
-    ttl: u8 @ 8;
-    proto: u8 @ 9;
-    checksum: u16 @ 10 [endian = be];
-    src: u32 @ 12 [endian = be];
-    dst: u32 @ 16 [endian = be];
-    options: bytes @ 20 [count = (.vihl & 0x0F) * 4 - 20];
-}
-```
-
-注意 RaE **没有**位域算子——`(.vihl & 0x0F) * 4 - 20` 在 schema 解析时被求值，要确认 parser 支持位运算。**实测限制**：当前 RaE expression 只有 `+ - * / == < >`，**没有位运算**。要先在外部把 `vihl` 拆成 version/IHL 两字节，或在 schema 里硬编码 IHL（IPv4 头通常 20 字节无 options，把 options 字段去掉）。
-
-简化：
+**位运算 `& << >>` 现在支持**，可以拆 version 和 IHL：
 
 ```rae
 struct IPv4 {
-    total_len: u16 @ 2 [endian = be];
-    ttl: u8 @ 8;
-    proto: u8 @ 9;
-    src: u32 @ 12 [endian = be];
-    dst: u32 @ 16 [endian = be];
+    vihl: u8;
+    dscpecn: u8;
+    total_len: u16 [endian = be];
+    ident: u16 [endian = be];
+    flags_frag: u16 [endian = be];
+    ttl: u8;
+    proto: u8;
+    checksum: u16 [endian = be];
+    src: u32 [endian = be];
+    dst: u32 [endian = be];
+    options: bytes [count = (.vihl & 0x0F) * 4 - 20];
 }
 ```
 
-丢字段比写错字段好。**生产场景**：先识别 packet 是 IPv4，再 `new` 重新构造完整头。
+**限制提醒**：`@ (expr)` 动态偏移求值时 env 是空 `[]`（参见 `engine.ml:346`），但 expr 内的 `.vihl` 是从 `call_env` / 全局 env 找，**不能引用本 struct 兄弟字段**。`options` 字段用 `.vihl & 0x0F` 这种"引用前序同 struct 字段"——**当前不能跑**。简化：硬编码 IHL（IPv4 头通常 20 字节无 options）：
 
-## TCP / UDP
+```rae
+struct IPv4 {
+    vihl: u8;
+    dscpecn: u8;
+    total_len: u16 [endian = be];
+    ident: u16 [endian = be];
+    flags_frag: u16 [endian = be];
+    ttl: u8;
+    proto: u8;
+    checksum: u16 [endian = be];
+    src: u32 [endian = be];
+    dst: u32 [endian = be];
+}
+```
+
+`version` 和 `ihl` 从 `vihl` 拆：
+
+```rae
+@block {
+    let v = .ipv4.vihl >> 4;
+    let ihl = .ipv4.vihl & 0x0F;
+    @echo(v); @echo(ihl)
+}
+```
+
+## TCP / UDP（flags 提取现在能做）
 
 TCP 头最小（20 字节定长部分）：
 
 ```rae
 struct TCP {
-    sport: u16 @ 0 [endian = be];
-    dport: u16 @ 2 [endian = be];
-    seq: u32 @ 4 [endian = be];
-    ack: u32 @ 8 [endian = be];
-    data_offset_flags: u16 @ 12 [endian = be];
-    window: u16 @ 14 [endian = be];
-    checksum: u16 @ 16 [endian = be];
-    urgent: u16 @ 18 [endian = be];
+    sport: u16 [endian = be];
+    dport: u16 [endian = be];
+    seq: u32 [endian = be];
+    ack: u32 [endian = be];
+    data_offset_flags: u16 [endian = be];
+    window: u16 [endian = be];
+    checksum: u16 [endian = be];
+    urgent: u16 [endian = be];
+}
+```
+
+flags 在 `data_offset_flags` 的低 9 位；data offset 在高 4 位：
+
+```rae
+@block {
+    let raw = .tcp.data_offset_flags;
+    let data_off = raw >> 12;                       // 头长（4 字节单位）
+    let flags = raw & 0x01FF;                       // 9 个 flag bit
+    let fin = flags & 0x001;                        // bit 0
+    let syn = (flags >> 1) & 0x001;                 // bit 1
+    let rst = (flags >> 2) & 0x001;                 // bit 2
+    let psh = (flags >> 3) & 0x001;                 // bit 3
+    let ack = (flags >> 4) & 0x001;                 // bit 4
+    let urg = (flags >> 5) & 0x001;                 // bit 5
+    @echo(syn)
 }
 ```
 
@@ -177,29 +202,54 @@ UDP：
 
 ```rae
 struct UDP {
-    sport: u16 @ 0 [endian = be];
-    dport: u16 @ 2 [endian = be];
-    length: u16 @ 4 [endian = be];
-    checksum: u16 @ 6 [endian = be];
+    sport: u16 [endian = be];
+    dport: u16 [endian = be];
+    length: u16 [endian = be];
+    checksum: u16 [endian = be];
 }
 ```
 
-flags 同样在 `data_offset_flags` 里，**当前 RaE 取不出单个 SYN/ACK 标志位**（无位运算）。要按位取值先用其它工具预处理。
+## TCP/IP Checksum 校验
+
+**现在可以做**（CRC32 / 16 位 sum 都有了）。TCP/IP checksum 是反码求和，不是 CRC：
+
+```rae
+@block {
+    let sum = @checksum(.tcp.sport);  // 占位：实际是 sum of all u16 words + carry fold
+    @echo(sum)
+}
+```
+
+`@checksum` 是 16 位 byte-sum，**不是** RFC 1071 的反码求和算法。要算正确的 IP/TCP checksum：
+
+```rae
+@block {
+    let bytes = .ipv4;  // VObj
+    let b = @checksum(bytes);
+    // ⚠️ 实际 checksum 算法是：
+    //   1. 把 header 按 u16 分组（最后不足补 0）
+    //   2. 加起来，fold 进位（> 16 bit 回卷）
+    //   3. 取反
+    // @checksum 给的是 byte sum，不等价。
+}
+```
+
+**生产场景**用外部脚本（Python `socket` 模块直接有 `ip_checksum`）算。
 
 ## DNS
 
-DNS 报文：12 字节头 + 4 段（question/answer/authority/additional），每段里是 name(type=压缩指针) + type(2B) + class(2B) + ...
+DNS 报文：12 字节头 + 4 段（question/answer/authority/additional）。
 
 最简（不解析压缩）：
 
 ```rae
 struct DNS {
-    qid: u16 @ 0 [endian = be];
-    flags: u16 @ 2 [endian = be];
-    qdcount: u16 @ 4 [endian = be];
-    ancount: u16 @ 6 [endian = be];
-    nscount: u16 @ 8 [endian = be];
-    arcount: u16 @ 10 [endian = be];
+    qid: u16 [endian = be];
+    flags: u16 [endian = be];
+    qdcount: u16 [endian = be];
+    ancount: u16 [endian = be];
+    nscount: u16 [endian = be];
+    arcount: u16 [endian = be];
 }
 ```
 
@@ -211,6 +261,20 @@ struct DNS {
 - 段计数：从 `qdcount`/`ancount` 读
 - 实际 name 字节：当作 `bytes` 字段取出来，再用 Python/Shell 解析
 
+## 字节序处理（`@bswap16` / `@bswap32`）
+
+网络协议字段读取时按字段自身的字节序；若要转成相反字节序写出去：
+
+```rae
+@block {
+    let native_val = .tcp.sport;        // 大端读出来的 VInt
+    let le_val = @bswap16(native_val);  // 翻转字节序
+    @echo(le_val)
+}
+```
+
+`@bswap16` 返回 `VInt`；`@bswap32` 返回 `VInt32`。在 `new` 构造结构体时把字段赋成 `@bswap16(...)` 结果可实现字节序转换输出。
+
 ## 典型任务
 
 ### 任务 1：列 PCAP 中 linktype
@@ -219,13 +283,7 @@ struct DNS {
 @echo(.hdr.linktype)
 ```
 
-### 任务 2：列 PCAP 每个包的捕获长度
-
-```rae
-@block { @each(r in .recs) { @echo(r.incl_len) } }
-```
-
-### 任务 3：IPv4 src/dst IP（已知偏移）
+### 任务 2：IPv4 src/dst IP（已知偏移）
 
 ```rae
 @block {
@@ -234,29 +292,39 @@ struct DNS {
 }
 ```
 
-IPv4 地址是网络字节序 u32；要转 dotted-quad：`(a>>24)&0xFF . (a>>16)&0xFF . (a>>8)&0xFF . a&0xFF`——**RaE 没位运算也没字符串拼接 `.`**。**生产场景**用外部脚本把 int 转字符串。
+IPv4 地址是网络字节序 u32；要转 dotted-quad：`(a>>24)&0xFF . (a>>16)&0xFF . (a>>8)&0xFF . a&0xFF`——**RaE 没字符串拼接运算符**。`@echo(@bswap32(.ipv4.src))` 翻转后仍是 int，转 dotted-quad 用 Python 后处理。
 
-### 任务 4：DNS 响应 answer 数
+### 任务 3：DNS 响应 answer 数
 
 ```rae
 @echo(.dns.ancount)
 ```
 
-### 任务 5：写一个最小 IPv4 头并落盘（仅头 20 字节）
+### 任务 4：写一个最小 IPv4 头并落盘
 
 ```rae
-let hdr = new IPv4 { total_len = 20, ttl = 64, proto = 17, src = 0xC0A80101, dst = 0xC0A80102 };
+let hdr = new IPv4 { vihl = 0x45, dscpecn = 0, total_len = 20, ident = 0,
+                     flags_frag = 0, ttl = 64, proto = 17, checksum = 0,
+                     src = 0xC0A80101, dst = 0xC0A80102 };
 @write("/tmp/ip.bin")
 ```
+
+### 任务 5：从 PCAP 流读（stdin）
+
+```bash
+tcpdump -w - | rae pcap.rae -o /dev/null
+```
+
+stdin 模式现在支持（`main.ml:9-17`），PCAP header 解析路径不变。
 
 ## 常见坑
 
 1. **大端 vs 小端**：网络协议字段基本都是大端；PCAP 文件级是文件 magic 决定。**别混**。
-2. **位域**：版本、flags、Fragment Offset 都在字节里，RaE 无位运算，要么拆字节要么写多字段。
-3. **变长头**：IPv4 options、TCP options、DNS name 都变长；先在 schema 外算好 offset 再切。
-4. **校验和**：TCP/UDP/IP 都需要重算，RaE 内置只有 16 位 byte sum，**不匹配**真实校验和算法。
-5. **压缩指针**：DNS name 走 14 位指针跨段；本 skill 不覆盖。
-6. **PCAP vs PCAPNG**：格式完全不一样，**别用 PCAP schema 读 PCAPNG**。
+2. **`@ (expr)` 动态偏移**：env 还是空，不能引用同 struct 字段
+3. **变长头**：IPv4 options、TCP options、DNS name 都变长；用 `After` 显式接续或硬编码
+4. **校验和**：TCP/UDP/IP header checksum 走 RFC 1071 反码求和，**`@checksum` 不等价**；要算正确值用外部脚本
+5. **压缩指针**：DNS name 走 14 位指针跨段；本 skill 不覆盖
+6. **PCAP vs PCAPNG**：格式完全不一样，**别用 PCAP schema 读 PCAPNG**
 
 ## 与其它 skill 的区别
 

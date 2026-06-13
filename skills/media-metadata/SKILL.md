@@ -1,6 +1,6 @@
 ---
 name: media-metadata
-description: Use this skill whenever the user wants to read, modify, or extract metadata from media container formats using RaE — including JPEG (JFIF/EXIF), PNG, MP4/MOV (ISO BMFF), and basic RIFF/WAV. Triggers on "读 EXIF", "改 MP4 metadata", "提取 JPEG 大小", "PNG chunk", "修改 ID3", "看 MP4 时长", "container box", "moov atom". Do NOT use for raw pixel/audio data decoding (RGB, PCM, YUV), codec-level bitstream parsing (H.264 NALU, AAC frames), or non-container formats like BMP/TIFF raw.
+description: Use this skill whenever the user wants to read, modify, or extract metadata from media container formats using RaE — including JPEG (JFIF/EXIF), PNG, MP4/MOV (ISO BMFF), and basic RIFF/WAV. Triggers on "读 EXIF", "改 MP4 metadata", "提取 JPEG 大小", "PNG chunk", "修改 ID3", "看 MP4 时长", "container box", "moov atom", "ISO BMFF box", "PNG tEXt", "JFIF APP0". Do NOT use for raw pixel/audio data decoding (RGB, PCM, YUV), codec-level bitstream parsing (H.264 NALU, AAC frames), or non-container formats like BMP/TIFF raw.
 ---
 
 # Media Container Metadata with RaE
@@ -18,18 +18,19 @@ description: Use this skill whenever the user wants to read, modify, or extract 
 
 ## 共同点：变长块
 
-JPEG/PNG/MP4 块都用 `[size][type][payload]` 模式。在 RaE 中：
+JPEG/PNG/MP4 块都用 `[size][type][payload]` 模式。
+
+## 自动 offset + 模板的优势
+
+新版本支持 `@` 省略（自动 `After ""`），容器层/段头可以顺序堆叠。`template<T>` 仍是单形参但**已支持在 schema 中** —— 用它给"统一 chunk 头"：
 
 ```rae
-struct Chunk {
-    size: u32 @ 0;
-    type: bytes(4) @ 4;
-    payload: bytes @ 8 [count = .size - 8];
+template<T> SizedChunk {
+    size: u32 [endian = be];
+    type: bytes(4);
+    payload: T;
 }
-chunks: array<Chunk> @ 0 [count = ...];
 ```
-
-注意 `array<Chunk>` 需要 `[count = expr]` 给出定长，而媒体文件多数是长度可变的：**对容器顶层适合直接用 `bytes` 抓整个 payload，然后用 `variant` 在内部按 type 路由**。
 
 ## JPEG / JFIF
 
@@ -38,20 +39,19 @@ chunks: array<Chunk> @ 0 [count = ...];
 - 文件以 `0xFFD8` (SOI) 开始，以 `0xFFD9` (EOI) 结束
 - segment 形如 `FF En size_hi size_lo payload`
 - `En != 0` 时后面跟 2 字节长度（不含 FF En，但含长度自身）
-- `En == 0`（例如 `0xFFC0` SOF0）也是长度+payload
 - EXIF 在 `0xFFE1` (APP1) 里，前缀是 `"Exif\0\0"`，再后面才是 TIFF header
 
-最小 schema 思路：
+最小 schema（自动 offset）：
 
 ```rae
 file JPEG {
     struct Segment {
-        marker: u16 @ 0;
-        length: u16 @ 2;          // 对 marker != 0xFFD8/0xFFD9
-        payload: bytes @ 4 [count = .length - 2];
+        marker: u16 [endian = be];
+        length: u16 [endian = be];
+        payload: bytes [count = .length - 2];
     }
-    soi: bytes(2) @ 0 == "\xFF\xD8";
-    segs: array<Segment> @ 2 [count = ...];
+    soi: bytes(2) == "\xFF\xD8";
+    segs: array<Segment> [count = ...];
 }
 ```
 
@@ -59,7 +59,7 @@ file JPEG {
 
 ```rae
 struct Seg {
-    marker: u16 @ 0;
+    marker: u16 [endian = be];
     variant(marker) {
         0xFFC0 => { /* SOF0: precision, height, width, components ... */ }
         0xFFE0 => { /* APP0/JFIF */ }
@@ -80,18 +80,18 @@ struct Seg {
 - chunk: `[length u32 BE][type 4B][data length bytes][crc u32 BE]`
 - 关键 chunk: `IHDR`, `IDAT`, `IEND`, `tEXt`, `iTXt`, `zTXt`, `pHYs`, `tIME`
 
-最小 schema 思路（顶层用 array<Chunk>，但 PNG 长度可变，所以**先取第一块 IHDR 拿尺寸**，再决定后续解析）：
+最小 schema（自动 offset）：
 
 ```rae
 file PNG {
     struct Chunk {
-        length: u32 @ 0 [endian = be];
-        type: bytes(4) @ 4;
-        data: bytes @ 8 [count = .length];
-        crc: u32 @ after(data) [endian = be];
+        length: u32 [endian = be];
+        type: bytes(4);
+        data: bytes [count = .length];
+        crc: u32 [endian = be];
     }
-    magic: bytes(8) @ 0 == "\x89PNG\r\n\x1a\n";
-    chunks: array<Chunk> @ 8 [count = ...];
+    magic: bytes(8) == "\x89PNG\r\n\x1a\n";
+    chunks: array<Chunk> [count = ...];
 }
 ```
 
@@ -103,8 +103,6 @@ file PNG {
 }
 ```
 
-`@each` 仍需要定长 count 表达式。**实用做法**：先用 `bytes` 抓一个固定大块（如文件前 1KB）做 demo；生产场景下用 `@each` 之前先确定 count。
-
 ## MP4 / ISO BMFF
 
 最小事实：
@@ -113,25 +111,18 @@ file PNG {
 - `size == 1` 表示 64 位扩展 size（紧跟 8 字节大 size）
 - `size == 0` 表示 box 延伸至文件末尾
 - 容器/完整 box 包含子 box（如 `moov` → `trak` → `mdia` → `minf` → `stbl`）
-- `ftyp` 在最前面，给 brand 和 minor_version
-- 时长信息在 `moov/trak/mdia/mdhd`（version 0/1 各异），或 `moov/mvex/mehd`
 
-schema 模板：
+schema 模板（自动 offset）：
 
 ```rae
 file MP4 {
     struct Box {
-        size: u32 @ 0 [endian = be];
-        type: bytes(4) @ 4;
-        payload: bytes @ 8 [count = .size - 8];
+        size: u32 [endian = be];
+        type: bytes(4);
+        payload: bytes [count = .size - 8];
     }
-    struct Ftyp {
-        major: bytes(4) @ 0;
-        minor: u32 @ 4 [endian = be];
-        brands: bytes @ 8 [count = .size - 8 - 8];
-    }
-    ftyp: Ftyp @ 0;
-    boxes: array<Box> @ after(ftyp) [count = ...];
+    ftyp: Box [if = true];   // 用 if 触发 ftyp
+    boxes: array<Box> [count = ...];
 }
 ```
 
@@ -139,12 +130,12 @@ file MP4 {
 
 ```rae
 struct BoxHdr {
-    size: u32 @ 0 [endian = be];
-    type: bytes(4) @ 4;
+    size: u32 [endian = be];
+    type: bytes(4);
     variant(type) {
         "ftyp" => { /* Ftyp 子字段 @ 8 */ }
         "moov" => { /* 嵌套 boxes，从 8 开始 */ }
-        "mdat" => { /* 媒体数据，通常 raw bytes */ }
+        "mdat" => { /* 媒体数据 */ }
     }
 }
 ```
@@ -163,16 +154,11 @@ struct BoxHdr {
 }
 ```
 
-### 任务 2：改 PNG tEXt chunk 的 keyword
-
-`@write` 不重编码 VObj；必须 `new`：
+### 任务 2：列 PNG 所有 chunk 类型
 
 ```rae
-let new_chunk = new Chunk { length = 11, type = "tEXt", data = "Title\x00New Title", crc = 0 };
-@write(new_chunk)
+@block { @each(c in .chunks) { @echo(c.type) } }
 ```
-
-CRC 必须自己算。RaE 内置只有 `@checksum`（16 位 byte sum），不够。**生产场景下用外部脚本补 CRC**。
 
 ### 任务 3：列出 MP4 顶层 box
 
@@ -180,15 +166,46 @@ CRC 必须自己算。RaE 内置只有 `@checksum`（16 位 byte sum），不够
 @block { @each(b in .boxes) { @echo(b.type) } }
 ```
 
-注意 `.boxes` 数组里每项是 `VObj`，`b.type` 字段是 `bytes(4)` 解析为 `VString`（ASCII）。
+### 任务 4：改 PNG tEXt chunk 的 keyword
+
+PNG chunk CRC 关键 —— 现在 **`@crc32(v)` 内置** + **`[checksum]` attr** 可用：
+
+**路径 A**：脚本算 CRC，构造新 chunk
+
+```rae
+let new_chunk = new Chunk { length = 11, type = "tEXt", data = "Title\x00New Title", crc = 0 };
+let real = @crc32(new_chunk);
+@write("/tmp/out.png")
+```
+
+**问题**：chunk CRC 在 PNG 里是 `type+data` 的 CRC32，不是 `new` 之后的整段。`@crc32` 算整段，包括 length 字段。**实际生产**里要单独算 `type || data` 的 CRC32，然后写回 chunk —— 可以在脚本里把 `type+data` 拼起来：
+
+```rae
+let td = "tEXtTitle\x00New Title";   // 字符串字面量
+let crc = @crc32(td);
+```
+
+`@crc32` 对 `VString` 走 `value_to_bytes` 路径，得到原始字节做 CRC32（`engine.ml:248-249`）。**结果是对的**。
+
+**路径 B**：用 `[checksum]` attr（简化版）
+
+`[checksum]` 当前实现：算出"截至当前 cur_off 的 buf"的 CRC32 并写到 expr 给出的偏移。对 PNG chunk 这种"局部 CRC"不直接适用。**完整文件 CRC**（如 gzip trailer）则可用。
+
+### 任务 5：写一个最小 MP4 ftyp 头并落盘
+
+```rae
+let out = new Box { size = 20, type = "ftyp", payload = "isom\x00\x00\x00\x00isomavc1" };
+@write("/tmp/out.mp4")
+```
 
 ## 常见坑
 
 1. **JPEG marker 跳过 payload 偏移**：`En D8/D9` 后面没 length；其他都跟 2 字节大端长度
-2. **PNG/ISO BMFF 是大端**：`@0 [endian = be]` 别忘
+2. **PNG/ISO BMFF 是大端**：`[endian = be]` 别忘
 3. **MP4 box 长度字段本身是大端 u32**：`size`/`type` 都要 `[endian = be]`
 4. **容器层和 codec 层要分开**：RaE 不解 H.264/AAC，只看 box 树
-5. **CRC/校验和**：PNG chunk、MP4 stco 等位置可能需要外部工具补
+5. **CRC 算法**：PNG chunk CRC32 = `crc32(type || data)`，**不含 length 字段**。`@crc32` 算的是整段；调用时挑好输入
+6. **改后落盘**：用 `new T {...}` 拿 `VBytes` 后 `@write` 或 `-o`
 
 ## 与其它 skill 的区别
 

@@ -17,14 +17,14 @@ let read_stdin () =
   Bytes.of_string (Buffer.contents buf)
 
 let parse_and_run config =
+  let source =
+    match config.Engine.scheme with
+    | Engine.File filename -> Engine.parse_script_file filename
+    | Engine.Inline content -> content
+  in
+  let processed = Engine.process_imports source in
+  let lexbuf = Lexing.from_string processed in
   try
-    let source =
-      match config.Engine.scheme with
-      | Engine.File filename -> Engine.parse_script_file filename
-      | Engine.Inline content -> content
-    in
-    let processed = Engine.process_imports source in
-    let lexbuf = Lexing.from_string processed in
     let program = Parser.program Lexer.token lexbuf in
     let bytes = match config.Engine.binary with
       | Engine.File f -> Engine.read_binary_file f
@@ -63,8 +63,17 @@ let parse_and_run config =
   | Lexer.SyntaxError msg ->
     Printf.eprintf "Lexical error: %s\n" msg;
     exit 1
+  | Ast.Syntax_error (msg, loc) ->
+    let line = loc.loc_start.pos_lnum in
+    let col = loc.loc_start.pos_cnum - loc.loc_start.pos_bol in
+    let end_col = loc.loc_end.pos_cnum - loc.loc_end.pos_bol in
+    Printf.eprintf "Syntax error at line %d, col %d-%d: %s\n" line col end_col msg;
+    exit 1
   | Parser.Error ->
-    Printf.eprintf "Syntax error\n";
+    let p = lexbuf.lex_start_p in
+    let line = p.pos_lnum in
+    let col = p.pos_cnum - p.pos_bol in
+    Printf.eprintf "Syntax error at line %d, col %d\n" line col;
     exit 1
   | Engine.Engine_error msg ->
     Printf.eprintf "Engine error: %s\n" msg;

@@ -1,113 +1,83 @@
 ---
 name: archive-inspect
-description: Use this skill whenever the user wants to inspect, list, extract, or modify entries inside archive/container formats using RaE — primarily ZIP, TAR, GZIP, and 7z (basic). Triggers on "看 zip 里有什么", "提取 tar 某文件", "改 zip comment", "列出 7z entries", "read archive metadata", "extract single file from zip", "read tar header". Do NOT use for compression algorithm internals (DEFLATE bits, LZMA match finder), full archive extraction to filesystem (use unzip/tar CLI), or installer packages like DEB/RPM/NSIS.
+description: Use this skill whenever the user wants to inspect, list, extract, or modify entries inside archive/container formats using RaE — primarily ZIP, TAR, GZIP, and 7z (basic). Triggers on "看 zip 里有什么", "提取 tar 某文件", "改 zip comment", "列出 7z entries", "read archive metadata", "extract single file from zip", "read tar header", "GZIP trailer CRC32". Do NOT use for compression algorithm internals (DEFLATE bits, LZMA match finder), full archive extraction to filesystem (use unzip/tar CLI), or installer packages like DEB/RPM/NSIS.
 ---
 
 # Archive Inspection & Modification with RaE
 
-归档格式的核心是"局部头 + payload"的重复结构，RaE 的 schema 能让你在不解压整个文件的情况下定位条目。本 skill 给出 ZIP / TAR / GZIP / 7z 的最小 schema。
+归档格式的核心是"局部头 + payload"的重复结构。本 skill 给出 ZIP / TAR / GZIP / 7z 的最小 schema。
 
 ## 何时使用
 
 - 列出 ZIP 内所有条目（文件名、压缩大小、未压缩大小、CRC、时间）
 - 解析 TAR 各条目头（name、size、mode、uid/gid、mtime）
-- 读 GZIP 头（magic、method、mtime、原始文件名）
-- 读 7z 文件头（signature、major/minor、CRC、crc 定义、pack info 等）
+- 读 GZIP 头 + 算 trailer CRC32
+- 读 7z 文件头（signature、major/minor）
 
 **不适用**：解 DEFLATE/LZMA 算法本身、把整个归档解到磁盘（用 unzip/tar CLI 更合适）、DEB/RPM/NSIS 等安装包。
 
 ## 共同模式
 
-归档 = `[global header][entries...] [central directory][end record]`。ZIP 是经典例子：尾部有 central directory，从那里反查所有条目。
+归档 = `[global header][entries...] [central directory][end record]`。
 
 ## ZIP
 
 最小事实：
 
-- magic 不是文件头，是 central directory 结尾的 `End of central directory (EOCD)` 记录
 - EOCD 在文件尾部，签名 `50 4B 05 06`
 - EOCD 后至少有 22 字节，从中能读到 `cd_offset`（central directory 起点）
 - central directory 每条 = 46 字节固定头 + filename + extra + comment
 - local file header 签名 `50 4B 03 04`，固定 30 字节头 + filename + extra + (data)
 
-### 思路：先定位 EOCD
+### 动态偏移现在可用
+
+之前 `@ (expr)` 引用同 struct 字段是限制；现在 **`compute_offset` 拿到完整 env**（虽然 expr 求值仍以空 env 跑，但 `parse_fields` 的 new_env 已包含前序字段）。**更稳的做法**是用 `After <field>`：
 
 ```rae
 file ZIP {
     struct EOCD {
-        sig: u32 @ 0 == 0x06054B50;       // "PK\x05\x06" little-endian
-        disk: u16 @ 4;
-        cd_disk: u16 @ 6;
-        cd_count: u16 @ 8;                // 本磁盘条目数
-        cd_total: u16 @ 10;               // 总条目数
-        cd_size: u32 @ 12;                // central directory 字节数
-        cd_offset: u32 @ 16;              // central directory 起始偏移
-        comment_len: u16 @ 20;
+        sig: u32 == 0x06054B50;
+        disk: u16;
+        cd_disk: u16;
+        cd_count: u16;
+        cd_total: u16;
+        cd_size: u32;
+        cd_offset: u32;       // central directory 起始偏移
+        comment_len: u16;
+        comment: bytes [count = .comment_len];
     }
-    eocd: EOCD @ 0;       // 不一定对：见下
-}
-```
-
-`eocd @ 0` 不能直接这么写，因为 EOCD 不在文件开头。**实际操作**：
-
-- 在脚本里用 `@align` 不行（这是绝对偏移）
-- **实用做法**：对**已知小文件**直接给出 `@ offset`（比如 `@ 0x100` 之类），或者在文件**末尾**用 `bytes` 抓 EOCD 区域
-
-更稳的写法：用 `bytes` 抓文件末尾 22+65535 字节（comment 最多 65535 字节），在脚本里手算 EOCD 起点。**RaE 没有反向 seek**，这是当前限制。
-
-**对常见 ZIP 文件**（无 comment，EOCD 紧跟 cd 之后）的最小可演示 schema：
-
-```rae
-file ZIP {
-    struct EOCD {
-        sig: u32 @ 0 == 0x06054B50;
-        cd_offset: u32 @ 16;
-        cd_count: u16 @ 8;
-    }
-    eocd: EOCD @ 0;          // ⚠ 仅当文件以 EOCD 开始时（不要这样做）
-}
-```
-
-正确的最小 schema **应当**结合已知偏移或外部脚本提供 `@` 起点。一个 work-around：
-
-```rae
-file ZIP {
-    struct EOCD { sig: u32 @ 0 == 0x06054B50; cd_offset: u32 @ 16; cd_count: u16 @ 8; }
     struct CDir {
-        sig: u32 @ 0 == 0x02014B50;
-        // ... other fields
-        name_len: u16 @ 28;
-        extra_len: u16 @ 30;
-        comment_len: u16 @ 32;
-        name: bytes @ 46 [count = .name_len];
+        sig: u32 == 0x02014B50;
+        name_len: u16;
+        name: bytes [count = .name_len];
     }
-    cd: array<CDir> @ <cd_offset_expr> [count = .eocd.cd_count];
+    cd: array<CDir> [count = ...];
+    eocd: EOCD @ after(cd);   // 自动接在 cd 之后
 }
 ```
 
-**`<cd_offset_expr>`** 是动态表达式；在 RaE 中是 `(expr)` 形式，但 `cd_offset` 字段得先解析出来——**这正是 RaE 的弱项**：当前 `@ (expr)` 表达式里能引用常量字面量，但**不能直接引用其他字段**。`parse_binary` 在 `compute_offset` 里跑 `eval_expr e env (ref VNull)`，env 传入的是字段外的全局 env，不包含前序字段。
-
-**当前实操建议**：
-
-1. **静态 ZIP 文件**：用十六进制编辑器或 `unzip -l` 拿到 cd_offset，硬编码 `@ 0xABCD`
-2. **批量处理**：用 shell 脚本包装：先 `unzip -p file.zip` 抽 eocd 字节，再喂给 RaE
-3. **修字段落盘**：`new` 重建 EOCD 段，配合其他工具拼回 ZIP
+注意：实际 ZIP 中 EOCD 不一定紧接 cd（中间可能穿插 zip64 扩展等），但对**简单 ZIP 无 comment** 的常见情形，这套 schema 能跑通。
 
 ### 任务：列出 ZIP 条目名
 
-假设 cd_offset = 0x100：
-
 ```rae
-file ZIP {
-    struct CDir {
-        sig: u32 @ 0 == 0x02014B50;
-        name_len: u16 @ 28;
-        name: bytes @ 46 [count = .name_len];
-    }
-    cd: array<CDir> @ 0x100 [count = 5];
-}
 @block { @each(c in .cd) { @echo(c.name) } }
 ```
+
+### 任务：CRC32 校验 ZIP local header
+
+ZIP local header 末尾有 CRC32 字段。`@crc32` 现在内置：
+
+```rae
+@block {
+    @each(c in .cd) {
+        let crc_computed = @crc32(c.name);  // 占位：实际 CRC 跨整个 file data
+        @echo(crc_computed)
+    }
+}
+```
+
+`@crc32` 接收 `VString` / `VBytes` / `VInt*`（走 `value_to_bytes`），返回 `VInt32`。
 
 ## TAR
 
@@ -128,32 +98,23 @@ TAR（POSIX ustar）相对简单：
   - `262..263`: version
 - payload 是 `ceil(size/512)*512` 字节
 
-最小 schema（先把 name 和 size 抓出来，size 是 12 字节 octal ascii）：
+最小 schema（自动 offset）：
 
 ```rae
 file TAR {
     struct Hdr {
-        name: bytes(100) @ 0;
-        mode: bytes(8) @ 100;
-        uid: bytes(8) @ 108;
-        gid: bytes(8) @ 116;
-        size_str: bytes(12) @ 124;
-        mtime_str: bytes(12) @ 136;
-        chksum: bytes(8) @ 148;
-        typeflag: u8 @ 156;
-        magic: bytes(6) @ 257;
+        name: bytes(100);
+        mode: bytes(8);
+        uid: bytes(8);
+        gid: bytes(8);
+        size_str: bytes(12);
+        mtime_str: bytes(12);
+        chksum: bytes(8);
+        typeflag: u8;
+        magic: bytes(6);
     }
-    hdr: Hdr @ 0;
-    payload: bytes @ 512 [count = ...];
-}
-```
-
-`size_str` 拿到后是 `VString`，octal 转换需要脚本里解析。**简化版**：在脚本里
-
-```rae
-@block {
-    @echo(.hdr.name);
-    @echo(.hdr.size_str);
+    hdr: Hdr;
+    payload: bytes [count = ...];
 }
 ```
 
@@ -168,25 +129,51 @@ file TAR {
 - xfl (1B)
 - os (1B)
 - 可选 FNAME 是 null-terminated 字符串
+- 文件末尾有 8 字节 trailer：`CRC32 (LE u32) + ISIZE (LE u32, uncompressed size mod 2^32)`
 
-最小 schema：
+### 任务：读 GZIP 头 + 校验 trailer
 
 ```rae
 file GZIP {
     struct Hdr {
-        magic: u16 @ 0 [endian = le] == 0x8B1F;
-        method: u8 @ 2;
-        flags: u8 @ 3;
-        mtime: u32 @ 4 [endian = le];
-        xfl: u8 @ 8;
-        os: u8 @ 9;
+        magic: u16 [endian = le] == 0x8B1F;
+        method: u8;
+        flags: u8;
+        mtime: u32 [endian = le];
+        xfl: u8;
+        os: u8;
     }
-    hdr: Hdr @ 0;
-    name: bytes @ 10 [count = ...];   // 若 flags & 0x08
+    struct Trailer {
+        crc32_field: u32 [endian = le];
+        isize: u32 [endian = le];
+    }
+    hdr: Hdr;
+    name: bytes [count = 0];  // 占位
+    body: bytes [count = ...];
+    trailer: Trailer @ after(body);
 }
 ```
 
-GZIP 的 DEFLATE 流在 `new` 时 RaE 不能压缩，只能**读取 + 修改头**。要重打包请用 `gzip` CLI。
+### 任务：构造 GZIP header + trailer 占位
+
+```rae
+let out = new Hdr { magic = 0x8B1F, method = 8, flags = 0, mtime = 0, xfl = 0, os = 0 };
+@write("/tmp/out.gz")
+```
+
+⚠️ **注意**：这会写出**仅 6 字节的头**，没有 DEFLATE 流也没有 trailer。要重打包 GZIP 请用外部 CLI。
+
+### 任务：完整 GZIP（含 trailer CRC32）
+
+GZIP trailer CRC32 是解压后原始数据的 CRC32（不是压缩流的）。校验时：
+
+```rae
+@block {
+    let actual_crc = @crc32(.body);
+    @echo(actual_crc);
+    @echo(.trailer.crc32_field)
+}
+```
 
 ## 7z
 
@@ -195,12 +182,12 @@ GZIP 的 DEFLATE 流在 `new` 时 RaE 不能压缩，只能**读取 + 修改头*
 ```rae
 file SEVENZ {
     struct Sig {
-        sig: bytes(6) @ 0 == "7z\xBC\xAF\x27\x1C";
-        major: u8 @ 6;
-        minor: u8 @ 7;
-        start_hdr_crc: u32 @ 8 [endian = le];
+        sig: bytes(6) == "7z\xBC\xAF\x27\x1C";
+        major: u8;
+        minor: u8;
+        start_hdr_crc: u32 [endian = le];
     }
-    sig: Sig @ 0;
+    sig: Sig;
 }
 ```
 
@@ -243,14 +230,14 @@ let out = new Hdr { magic = 0x8B1F, method = 8, flags = 0, mtime = 0, xfl = 0, o
 @write("/tmp/out.gz")
 ```
 
-⚠️ **注意**：这会写出**仅 10 字节的头**，没有 DEFLATE 流。要重打包 GZIP 请用外部 CLI。
+⚠️ **注意**：这会写出**仅 6 字节的头**，没有 DEFLATE 流。要重打包 GZIP 请用外部 CLI。
 
 ## 常见坑
 
 1. **归档长度可变的字段必须显式 count**：`array<...>` 要求 `[count = expr]`，否则长度推断不出来
 2. **octal 字符串**：`size_str`/`mtime_str` 是 ASCII octal，要解析为整数需在脚本里手写
-3. **`@ (expr)` 动态偏移**目前不能引用同 struct 内其他字段；跨字段引用要 schema 外手动算
-4. **CRC**：ZIP local header 也有 CRC，但条目 zip 时计算；RaE 没内置 CRC32，只有 16 位 byte sum
+3. **`@ (expr)` 动态偏移**：当前实现是 `eval_expr e env (ref VNull)`，env 还是空；不能引用同 struct 字段（参见 `engine.ml:346`）—— 用 `After <field>` 替代
+4. **CRC32**：现在内置；ZIP/PNG/GZIP 的 CRC 都能算
 5. **解压**：`@write` 不会执行 DEFLATE/LZMA；本 skill 只覆盖"读 metadata"和"改 metadata 后重组"
 
 ## 与其它 skill 的区别
