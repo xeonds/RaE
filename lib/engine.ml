@@ -42,10 +42,12 @@ let format_value v = match v with
   | VArray items -> Printf.sprintf "[%d]" (List.length items)
   | VObj fields -> Printf.sprintf "<obj %d>" (List.length fields)
   | VNull -> "null"
+let write_uint value size = let buf = Bytes.make size '\000' in let v = ref value in for i = 0 to size - 1 do Bytes.set buf i (Char.chr (Int64.to_int (Int64.logand !v 0xFFL))); v := Int64.shift_right_logical !v 8 done; buf
 
 let value_to_bytes v = match v with
   | VBytes b -> b | VString s -> Bytes.of_string s
-  | VInt n -> Bytes.of_string (string_of_int n) | VInt32 n -> Bytes.of_string (Int32.to_string n) | VInt64 n -> Bytes.of_string (Int64.to_string n)
+  | VInt n -> write_uint (Int64.of_int n) (if n < 256 then 1 else if n < 65536 then 2 else 4)
+  | VInt32 n -> Bytes.of_string (Int32.to_string n) | VInt64 n -> Bytes.of_string (Int64.to_string n)
   | VArray items -> let buf = Buffer.create 64 in
     List.iter (fun item -> match item with VInt n -> Buffer.add_string buf (string_of_int n) | VInt32 n -> Buffer.add_string buf (Int32.to_string n) | VInt64 n -> Buffer.add_string buf (Int64.to_string n) | VString s -> Buffer.add_string buf s | _ -> ()) items;
     Bytes.of_string (Buffer.contents buf)
@@ -56,7 +58,6 @@ let value_to_bytes v = match v with
   | VNull -> Bytes.of_string "null" | VFloat f -> Bytes.of_string (string_of_float f)
 
 let serialize_value v _env = match v with VBytes b -> b | _ -> value_to_bytes v
-let write_uint value size = let buf = Bytes.make size '\000' in let v = ref value in for i = 0 to size - 1 do Bytes.set buf i (Char.chr (Int64.to_int (Int64.logand !v 0xFFL))); v := Int64.shift_right_logical !v 8 done; buf
 let reverse_bytes b = let len = Bytes.length b in let r = Bytes.make len '\000' in for i = 0 to len - 1 do Bytes.set r i (Bytes.get b (len - 1 - i)) done; r
 let size_of_type = function I8|U8 -> 1 | I16|U16 -> 2 | I32|U32|F32 -> 4 | I64|U64|F64 -> 8 | BytesType(Some(IntLit(n,_))) -> n | _ -> 0
 
@@ -112,10 +113,12 @@ and eval_expr expr env current = match expr with
   | Pipe (e1, e2, _) -> eval_expr e2 env (ref (eval_expr e1 env current))
   | BlockLit (lets, body, _) ->
     let env' = List.fold_left (fun env (id,e) -> (id, eval_expr e env current) :: env) env lets in
-    (match List.rev body with [] -> VNull | last :: rev_rest -> List.iter (fun e -> ignore (eval_expr e env' current)) rev_rest; eval_expr last env' current)
+    let rec run = function [] -> VNull | [e] -> eval_expr e env' current | e :: rest -> ignore (eval_expr e env' current); run rest in
+    run body
   | Assign (e1, e2, _) -> let rhs = eval_expr e2 env current in current := set_path e1 env !current rhs; !current
   | Construct (name, field_vals, _) ->
-    let vals = List.map (fun (k, e) -> (k, eval_expr e env current)) field_vals in construct_binary name vals !construct_defs
+    let vals = List.map (fun (k, e) -> (k, eval_expr e env current)) field_vals in
+    let bytes = construct_binary name vals !construct_defs in current := bytes; bytes
   | UnaryOp (op, e, _) ->
     let v = eval_expr e env current in match op, v with
     | Neg, VInt n -> VInt (-n) | Neg, VInt32 n -> VInt32 (Int32.neg n) | Neg, VInt64 n -> VInt64 (Int64.neg n) | Neg, VFloat f -> VFloat (-. f)
@@ -168,7 +171,13 @@ and write_value typ v = match typ with
 and construct_binary name field_vals struct_defs =
   let info = try lookup_struct name struct_defs with _ -> raise (Engine_error (Printf.sprintf "Struct '%s' not found for construction" name)) in
   let total = ref 0 in let cur_off = ref 0 in
-  List.iter (fun f -> let sz = size_of_type f.field_type in let off = match f.offset with Fixed n -> n | _ -> !cur_off in total := max !total (off + sz); cur_off := off + sz) info.fields;
+  List.iter (fun f ->
+    let sz = match f.field_type with
+      | Ast.ArrayType elem ->
+        let count = List.fold_left (fun acc attr -> match attr with Ast.Count (IntLit(n,_),_) -> n | _ -> acc) 1 f.attributes in
+        count * size_of_type elem
+      | _ -> size_of_type f.field_type in
+    let off = match f.offset with Fixed n -> n | _ -> !cur_off in total := max !total (off + sz); cur_off := off + sz) info.fields;
   let buf = Bytes.make !total '\000' in cur_off := 0; let checksum_fields = ref [] in
   List.iter (fun f -> let offset = match f.offset with Fixed n -> n | _ -> !cur_off in
     (match List.find_map (fun attr -> match attr with Ast.Checksum (_,_) -> Some offset | _ -> None) f.attributes with Some cs_off -> checksum_fields := (cs_off, f) :: !checksum_fields | None -> ());
@@ -194,8 +203,8 @@ let values_equal a b = match a, b with
 (* ---------- schema evaluation ---------- *)
 let compute_offset off_expr prev_offset base_offset env field_ends = match off_expr with
   | Fixed n -> base_offset + n | After name -> if name = "" then prev_offset else (try List.assoc name field_ends with Not_found -> prev_offset)
-  | Align e -> let n = match eval_expr e env (ref VNull) with VInt n -> n | _ -> 1 in ((prev_offset + n - 1) / n) * n
-  | Dynamic e -> match eval_expr e env (ref VNull) with VInt n -> n | _ -> prev_offset
+  | Align e -> let n = match eval_expr e env (ref (VObj env)) with VInt n -> n | _ -> 1 in ((prev_offset + n - 1) / n) * n
+  | Dynamic e -> match eval_expr e env (ref (VObj env)) with VInt n -> n | _ -> prev_offset
 
 let read_uint data offset size endian = let acc = ref Int64.zero in for i = 0 to size - 1 do let pos = match endian with Some BE -> offset+size-1-i | _ -> offset+i in acc := Int64.logor !acc (Int64.shift_left (Int64.of_int (Char.code (Bytes.get data pos))) (8*i)) done; !acc
 
@@ -221,7 +230,7 @@ let parse_binary schema bytes =
   and parse_field f data offset env endian = match f.field_type with
     | Ast.TemplateType (name, args) -> let members = lookup_template name (List.map (fun a -> Ast.StructType a) args) struct_registry in let struct_env, _, _ = parse_fields members data offset offset [] [] in (VObj struct_env, 0)
     | Ast.StructType name -> let info = lookup_struct name struct_registry in let struct_env, final_off, struct_ends = parse_fields info.fields data offset offset [] [] in (dispatch_variants info data offset struct_env struct_ends, final_off - offset)
-    | Ast.ArrayType elem_type -> let count = ref 1 in List.iter (fun attr -> match attr with Ast.Count (expr,_) -> (match eval_expr expr env (ref VNull) with VInt n -> count := n | _ -> ()) | _ -> ()) f.attributes; let elems = ref [] in let off = ref offset in for _i = 1 to !count do let v, sz = match elem_type with Ast.StructType name -> let info = lookup_struct name struct_registry in let env', fo, _ = parse_fields info.fields data !off !off [] [] in (VObj env', fo - !off) | _ -> let bty = parse_field_bytes elem_type endian data !off in (bty, size_of_type elem_type) in elems := v :: !elems; off := !off + sz done; (VArray (List.rev !elems), !off - offset)
+    | Ast.ArrayType elem_type -> let count = ref 1 in let cur = ref (VObj env) in List.iter (fun attr -> match attr with Ast.Count (expr,_) -> (match eval_expr expr env cur with VInt n -> count := n | _ -> ()) | _ -> ()) f.attributes; let elems = ref [] in let off = ref offset in for _i = 1 to !count do let v, sz = match elem_type with Ast.StructType name -> let info = lookup_struct name struct_registry in let env', fo, _ = parse_fields info.fields data !off !off [] [] in (VObj env', fo - !off) | _ -> let bty = parse_field_bytes elem_type endian data !off in (bty, size_of_type elem_type) in elems := v :: !elems; off := !off + sz done; (VArray (List.rev !elems), !off - offset)
     | _ -> let bty = parse_field_bytes f.field_type endian data offset in (bty, size_of_type f.field_type)
   and dispatch_variants info data base_offset env field_ends = let final_env = ref env in List.iter (fun (tag_name, cases) -> let tag_val = try List.assoc tag_name !final_env with Not_found -> VNull in List.iter (fun case -> let expected = eval_expr case.pattern [] (ref VNull) in if values_equal tag_val expected then let case_env, _, _ = parse_fields case.fields data base_offset base_offset !final_env field_ends in final_env := case_env) cases) info.variants; VObj !final_env
   in let env, _, _ = parse_fields schema.fields bytes 0 0 [] [] in env
