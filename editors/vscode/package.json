@@ -1,0 +1,45 @@
+{
+  "name": "rae-lsp",
+  "displayName": "RaE Language Support",
+  "description": "Language support for RaE (binary schema DSL) — syntax highlighting + diagnostics via LSP",
+  "version": "0.1.0",
+  "publisher": "rae",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": ["Programming Languages"],
+  "activationEvents": [
+    "onLanguage:rae"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [{
+      "id": "rae",
+      "extensions": [".rae", ".RaE"],
+      "aliases": ["RaE", "rae"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "rae",
+      "scopeName": "source.rae",
+      "path": "./syntaxes/rae.tmLanguage.json"
+    }],
+    "configuration": {
+      "title": "RaE",
+      "properties": {
+        "rae.lsp.path": {
+          "type": "string",
+          "default": "rae-lsp",
+          "description": "Path to the rae-lsp executable"
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.75.0"
+  }
+}
