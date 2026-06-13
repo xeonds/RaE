@@ -50,6 +50,7 @@ type attribute =
   | Cond of expr * loc
   | Validate of expr * loc
   | Endian of endian_kind * loc
+  | Checksum of expr * loc
 
 and endian_kind = LE | BE
 
@@ -112,7 +113,7 @@ type def =
       loc: loc;
     }
   | TemplateDef of {
-      param: identifier;
+      params: identifier list;
       name: identifier;
       members: field_decl list;
       loc: loc;

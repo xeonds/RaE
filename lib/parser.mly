@@ -113,8 +113,8 @@ bitfield_item:
 (* ---------- template ---------- *)
 
 template_def:
-  | TEMPLATE LT param = IDENT GT name = IDENT LBRACE ms = list(field_decl) RBRACE
-    { TemplateDef { param; name; members = ms; loc = mk_loc $startpos $endpos } }
+  | TEMPLATE LT params = separated_list(COMMA, IDENT) GT name = IDENT LBRACE ms = list(field_decl) RBRACE
+    { TemplateDef { params; name; members = ms; loc = mk_loc $startpos $endpos } }
   ;
 
 (* ============== field declaration ============== *)
@@ -159,6 +159,7 @@ attribute:
       | "count"    -> Count(e, loc)
       | "if"       -> Cond(e, loc)
       | "validate" -> Validate(e, loc)
+      | "checksum" -> Checksum(e, loc)
       | _          -> failwith ("Unknown attribute: " ^ key) }
   | ENDIAN EQUAL k = endian_kind
     { Endian(k, mk_loc $startpos $endpos) }

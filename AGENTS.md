@@ -67,3 +67,18 @@ Other checks (range, set, checksum) live in the **operation layer** via `@checks
 - All source in `lib/`; the binary in `bin/` is thin
 - `.ml` files are implementations, `.mli` are interfaces (none yet), `.mll` = ocamllex, `.mly` = menhir
 - Keep `_build/` gitignored (Dune output)
+
+## Development Workflow (lessons from building RaE)
+- **Feature work touches 4 files**: `ast.ml` (type) → `lexer.mll` (token) → `parser.mly` (syntax) → `engine.ml` (semantics). Every feature walks this chain.
+- **Build after every AST change**: dune caches aggressively; run `dune build` immediately to catch type mismatches before they cascade.
+- **Full rewrite beats patching**: when 3+ edits fail in a row, write the entire file from scratch. OCaml's type checker catches all mistakes cleanly.
+- **Avoid `_ -> VNull` / `_ -> Bytes.empty` fallthroughs**: every catch-all is a silent bug. Raise `Engine_error` with a descriptive message.
+- **OCaml quirks to watch**:
+  - `and` chains: types in mutual recursion share label namespace — avoid duplicate field names across `and`-linked records.
+  - `let rec ... and ...`: only for mutually recursive FUNCTIONS. Types use `type ... and ...` (no `rec`).
+  - `match e with pattern | _ -> raise ...` — the `|` before `_` must be on the same logical line as the previous case's expression, or parenthesized.
+  - `Bytes.get`/`Bytes.set` for bytes indexing, NOT `.[]` which is for strings.
+  - Parameter names that shadow type names can confuse type inference — use explicit `: Ast.type` annotations or rename params.
+- **Menhir conflicts**: shift/reduce at IDENT-LPAREN, DOT-LBRACK, and MINUS are expected for expression parsers. Menhir's default shift resolves them correctly. Don't fight them.
+- **Test after every logical chunk**: `printf '\x...' > /tmp/t.bin && dune exec rae -- "..." /tmp/t.bin`. One-liner assertions catch regressions instantly.
+- **Commit granularity**: one commit per feature group (AST+Lexer+Parser, Engine, Main+Config, Docs). Don't mix unrelated changes.
