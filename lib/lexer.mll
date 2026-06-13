@@ -34,9 +34,9 @@ rule token = parse
   | "variant"|"VARIANT" { VARIANT }
   | "after"|"AFTER"   { AFTER }
   | "align"|"ALIGN"   { ALIGN }
-  | "count"|"COUNT"   { COUNT }
-  | "validate"|"VALIDATE" { VALIDATE }
-  | "endian"|"ENDIAN" { ENDIAN }
+  | "let"|"LET" { LET }
+  | "in"|"IN"   { IN }
+  | "new"|"NEW" { NEW }
   | "le"|"LE" { LEND }
   | "be"|"BE" { BEND }
   | "let"|"LET" { LET }

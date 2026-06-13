@@ -19,8 +19,9 @@ let parse_and_run config =
     | file_schema :: _ ->
       let env = Engine.parse_binary file_schema bytes in
       let root = Ast.VObj env in
-      let call_env = ["__raw__", Ast.VBytes bytes] in
-      Engine.set_construct_defs file_schema.Ast.definitions;
+      let call_env = ["__raw__", Ast.VBytes bytes; "__file__", Ast.VString file_schema.Ast.name] in
+      let all_defs = (Ast.StructDef { name = file_schema.Ast.name; params = []; members = List.map (fun f -> Ast.Field f) file_schema.Ast.fields; condition = None; loc = file_schema.Ast.loc }) :: file_schema.Ast.definitions in
+      Engine.set_construct_defs all_defs;
       let result = Engine.eval_actions program.actions call_env root in
       begin match result with
       | Ast.VInt n -> Printf.printf "%d\n" n

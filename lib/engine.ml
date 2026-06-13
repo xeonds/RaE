@@ -67,6 +67,12 @@ let value_to_bytes v = match v with
 
 let serialize_value v _env = match v with VBytes b -> b | _ -> value_to_bytes v
 
+let reverse_bytes b =
+  let len = Bytes.length b in
+  let r = Bytes.make len '\000' in
+  for i = 0 to len - 1 do Bytes.set r i (Bytes.get b (len - 1 - i)) done;
+  r
+
 let write_uint value size =
   let buf = Bytes.make size '\000' in let v = ref value in
   for i = 0 to size - 1 do
@@ -227,7 +233,14 @@ and eval_builtin name args env current = match name, args with
     let bytes = value_to_bytes !current in
     let sum = ref 0 in for i = 0 to Bytes.length bytes - 1 do sum := !sum + Char.code (Bytes.get bytes i) done; VInt (!sum land 0xFFFF)
   | "write", [e] ->
-    let v = eval_expr e env current in let bytes = serialize_value !current env in
+    let v = eval_expr e env current in
+    let bytes = (match !current with
+      | VObj fields ->
+        let file_name = try match List.assoc "__file__" env with VString s -> s | _ -> "" with Not_found -> "" in
+        if file_name <> "" then
+          (match construct_binary file_name fields !construct_defs with VBytes b -> b | _ -> serialize_value !current env)
+        else serialize_value !current env
+      | _ -> serialize_value !current env) in
     (match v with VString filename -> let oc = open_out_bin filename in output oc bytes 0 (Bytes.length bytes); close_out oc; VInt 0 | _ -> VNull)
   | "object", _ -> VObj []
   | _ -> VNull
@@ -255,7 +268,7 @@ and construct_binary name field_vals struct_defs =
     let offset = match f.offset with Fixed n -> n | _ -> 0 in
     let evald = (try List.assoc f.name field_vals
       with Not_found -> raise (Engine_error (Printf.sprintf "Field '%s' not provided for construction" f.name))) in
-    let field_bytes = match f.field_type with
+    let raw = match f.field_type with
       | Ast.StructType sn ->
         (match evald with
          | VObj sub -> (match construct_binary sn sub struct_defs with VBytes b -> b | _ -> Bytes.empty)
@@ -267,6 +280,8 @@ and construct_binary name field_vals struct_defs =
            List.iter (fun item -> Buffer.add_bytes buf2 (write_value elem item)) items;
            Bytes.of_string (Buffer.contents buf2) | _ -> raise (Engine_error "Construction of array requires VArray value"))
       | _ -> write_value f.field_type evald in
+    let field_bytes = let is_be = List.exists (fun attr -> match attr with Ast.Endian (BE, _) -> true | _ -> false) f.attributes in
+      if is_be then reverse_bytes raw else raw in
     Bytes.blit field_bytes 0 buf offset (Bytes.length field_bytes)) !flat_fields;
   VBytes buf
 
@@ -329,8 +344,8 @@ let parse_binary schema bytes =
     | [] -> (env, prev_offset, field_ends)
     | f :: rest ->
       let offset = compute_offset f.offset prev_offset base_offset env field_ends in
-      let val_ = parse_field f data offset (field_endian f.attributes) in
-      let size = size_of_field f data offset in
+      let val_ = parse_field f data offset env (field_endian f.attributes) in
+      let size = size_of_field f data offset env in
       let new_env = (f.name, val_) :: env in
       let new_ends = (f.name, offset + size) :: field_ends in
       (match f.expects with
@@ -339,7 +354,7 @@ let parse_binary schema bytes =
            raise (Engine_error (Printf.sprintf "Field '%s' expected value doesn't match" f.name))
        | None -> ());
       parse_fields rest data base_offset (offset + size) new_env new_ends
-  and parse_field f data offset endian = match f.field_type with
+  and parse_field f data offset env endian = match f.field_type with
     | Ast.TemplateType (name, args) ->
        (match args with [arg] ->
          let members = lookup_template name name (Ast.StructType arg) struct_registry in
@@ -352,7 +367,7 @@ let parse_binary schema bytes =
     | Ast.ArrayType elem_type ->
       let count = ref 1 in
       List.iter (fun attr -> match attr with Ast.Count (expr,_) ->
-        (match eval_expr expr [] (ref VNull) with VInt n -> count := n | _ -> ()) | _ -> ()) f.attributes;
+        (match eval_expr expr env (ref VNull) with VInt n -> count := n | _ -> ()) | _ -> ()) f.attributes;
       let elems = ref [] in let off = ref offset in
       for _i = 1 to !count do
         let v = match elem_type with
@@ -368,7 +383,7 @@ let parse_binary schema bytes =
           | _ -> size_of_type elem_type)
       done; VArray (List.rev !elems)
     | _ -> parse_field_bytes f.field_type endian data offset
-  and size_of_field f data offset = match f.field_type with
+  and size_of_field f data offset env = match f.field_type with
     | Ast.TemplateType (name, [arg]) ->
       let members = lookup_template name name (Ast.StructType arg) struct_registry in
       let _, fo, _ = parse_fields members data offset offset [] [] in fo - offset
@@ -378,7 +393,7 @@ let parse_binary schema bytes =
     | Ast.ArrayType elem_type ->
       let count = ref 1 in
       List.iter (fun attr -> match attr with Ast.Count (expr,_) ->
-        (match eval_expr expr [] (ref VNull) with VInt n -> count := n | _ -> ()) | _ -> ()) f.attributes;
+        (match eval_expr expr env (ref VNull) with VInt n -> count := n | _ -> ()) | _ -> ()) f.attributes;
       let elem_size = match elem_type with
         | Ast.StructType name ->
           let info = lookup_struct name struct_registry in

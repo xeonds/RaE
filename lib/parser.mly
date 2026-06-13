@@ -16,7 +16,7 @@ let syntax_error msg sp ep = raise (Syntax_error (msg, mk_loc sp ep))
 %token <string> STRING_LIT
 
 %token FILE STRUCT ENUM BITFIELD TEMPLATE VARIANT
-%token AFTER ALIGN COUNT VALIDATE ENDIAN LEND BEND LET IN NEW
+%token AFTER ALIGN LET IN NEW ENDIAN LEND BEND
 %token I8 I16 I32 I64 U8 U16 U32 U64 F32 F64
 %token STRING BYTES ARRAY
 %token LBRACE RBRACE LPAREN RPAREN LBRACK RBRACK
@@ -163,8 +163,7 @@ endian_kind:
   ;
 
 attr_key:
-  | COUNT    { "count" }
-  | VALIDATE { "validate" }
+  | ENDIAN   { "endian" }
   | IDENT    { $1 }
   ;
 
@@ -314,8 +313,6 @@ at_func_name:
   | IDENT    { $1 }
   | ALIGN    { "align" }
   | AFTER    { "after" }
-  | COUNT    { "count" }
-  | VALIDATE { "validate" }
   | ENDIAN   { "endian" }
   ;
 
