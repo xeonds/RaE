@@ -164,8 +164,8 @@ type_expr:
   | basic_type { $1 }
   | ARRAY LT t = type_expr GT
     { ArrayType t }
-  | STRING LPAREN enc = option(STRING_LIT) RPAREN
-    { StringType(Option.value enc ~default:"utf8") }
+  | STRING LPAREN _sz = option(expr) RPAREN
+    { StringType("utf8") }
   | STRING
     { StringType("utf8") }
   | BYTES LPAREN sz = option(expr) RPAREN

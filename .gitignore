@@ -1,3 +1,5 @@
 _build/
 parser.automaton
 parser.conflicts
+*.bin
+out*

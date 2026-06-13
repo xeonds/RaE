@@ -150,26 +150,38 @@ let rec eval_expr expr env current =
   | UnaryOp _ -> VNull
 
 and eval_binary_op op v1 v2 =
+  let vint n = VInt n and vi32 n = VInt32 n and vi64 n = VInt64 n in
   match op, v1, v2 with
-  | Add, VInt a, VInt b -> VInt (a + b)
-  | Sub, VInt a, VInt b -> VInt (a - b)
-  | Mul, VInt a, VInt b -> VInt (a * b)
-  | Div, VInt a, VInt b -> VInt (a / b)
-  | Add, VInt32 a, VInt32 b -> VInt32 (Int32.add a b)
-  | Sub, VInt32 a, VInt32 b -> VInt32 (Int32.sub a b)
-  | Mul, VInt32 a, VInt32 b -> VInt32 (Int32.mul a b)
-  | Div, VInt32 a, VInt32 b -> VInt32 (Int32.div a b)
-  | Add, VInt64 a, VInt64 b -> VInt64 (Int64.add a b)
-  | Sub, VInt64 a, VInt64 b -> VInt64 (Int64.sub a b)
-  | Mul, VInt64 a, VInt64 b -> VInt64 (Int64.mul a b)
-  | Div, VInt64 a, VInt64 b -> VInt64 (Int64.div a b)
-  | Eq, VInt a, VInt b -> VInt (if a = b then 1 else 0)
-  | Lt, VInt a, VInt b -> VInt (if a < b then 1 else 0)
-  | Gt, VInt a, VInt b -> VInt (if a > b then 1 else 0)
-  | Eq, VInt32 a, VInt32 b -> VInt (if a = b then 1 else 0)
-  | Lt, VInt32 a, VInt32 b -> VInt (if a < b then 1 else 0)
-  | Eq, VInt64 a, VInt64 b -> VInt (if a = b then 1 else 0)
-  | Eq, VString a, VString b -> VInt (if a = b then 1 else 0)
+  | Add, VInt a, VInt b -> vint (a + b)
+  | Sub, VInt a, VInt b -> vint (a - b)
+  | Mul, VInt a, VInt b -> vint (a * b)
+  | Div, VInt a, VInt b -> vint (a / b)
+  | Add, VInt32 a, VInt32 b -> vi32 (Int32.add a b)
+  | Sub, VInt32 a, VInt32 b -> vi32 (Int32.sub a b)
+  | Mul, VInt32 a, VInt32 b -> vi32 (Int32.mul a b)
+  | Div, VInt32 a, VInt32 b -> vi32 (Int32.div a b)
+  | Add, VInt64 a, VInt64 b -> vi64 (Int64.add a b)
+  | Sub, VInt64 a, VInt64 b -> vi64 (Int64.sub a b)
+  | Mul, VInt64 a, VInt64 b -> vi64 (Int64.mul a b)
+  | Div, VInt64 a, VInt64 b -> vi64 (Int64.div a b)
+  | Add, VInt32 a, VInt b -> vi32 (Int32.add a (Int32.of_int b))
+  | Add, VInt a, VInt32 b -> vi32 (Int32.add (Int32.of_int a) b)
+  | Sub, VInt32 a, VInt b -> vi32 (Int32.sub a (Int32.of_int b))
+  | Mul, VInt32 a, VInt b -> vi32 (Int32.mul a (Int32.of_int b))
+  | Div, VInt32 a, VInt b -> vi32 (Int32.div a (Int32.of_int b))
+  | Add, VInt64 a, VInt b -> vi64 (Int64.add a (Int64.of_int b))
+  | Add, VInt a, VInt64 b -> vi64 (Int64.add (Int64.of_int a) b)
+  | Eq, VInt a, VInt b -> vint (if a = b then 1 else 0)
+  | Lt, VInt a, VInt b -> vint (if a < b then 1 else 0)
+  | Gt, VInt a, VInt b -> vint (if a > b then 1 else 0)
+  | Eq, VInt32 a, VInt32 b -> vint (if a = b then 1 else 0)
+  | Lt, VInt32 a, VInt32 b -> vint (if a < b then 1 else 0)
+  | Eq, VInt64 a, VInt64 b -> vint (if a = b then 1 else 0)
+  | Eq, VInt32 a, VInt b -> vint (if Int32.to_int a = b then 1 else 0)
+  | Eq, VInt a, VInt32 b -> vint (if a = Int32.to_int b then 1 else 0)
+  | Eq, VInt64 a, VInt b -> vint (if Int64.to_int a = b then 1 else 0)
+  | Eq, VInt a, VInt64 b -> vint (if a = Int64.to_int b then 1 else 0)
+  | Eq, VString a, VString b -> vint (if a = b then 1 else 0)
   | _ -> VNull
 
 and eval_builtin name args env current =
@@ -283,6 +295,7 @@ let size_of_type = function
   | I32 | U32 | F32 -> 4
   | I64 | U64 | F64 -> 8
   | StringType _ -> 0
+  | BytesType (Some (IntLit (n, _))) -> n
   | BytesType _ -> 0
   | ArrayType _ -> 0
   | StructType _ -> 0
@@ -294,28 +307,56 @@ let field_endian attrs =
   ) None attrs
 
 let read_uint data offset size endian =
-  let acc = ref 0 in
+  let acc = ref Int64.zero in
   for i = 0 to size - 1 do
     let pos = match endian with
       | Some BE -> offset + size - 1 - i
       | _ -> offset + i
     in
-    acc := !acc lor ((Char.code (Bytes.get data pos)) lsl (8 * i))
+    acc := Int64.logor !acc (Int64.shift_left (Int64.of_int (Char.code (Bytes.get data pos))) (8 * i))
   done;
   !acc
 
+let read_sint data offset size endian =
+  let raw = read_uint data offset size endian in
+  let bits = size * 8 in
+  let sign_bit = Int64.shift_left Int64.one (bits - 1) in
+  if Int64.logand raw sign_bit <> Int64.zero then
+    Int64.logor raw (Int64.lognot (Int64.sub sign_bit Int64.one))
+  else raw
+
+let int_of_float32 bits =
+  Int32.float_of_bits (Int32.of_int (Int64.to_int bits))
+
+let float_of_float64 bits =
+  Int64.float_of_bits bits
+
 let parse_value typ data endian =
   match typ with
-  | I8 | U8 -> VInt (Char.code (Bytes.get data 0))
-  | I16 | U16 -> VInt (read_uint data 0 2 endian)
-  | I32 | U32 | F32 -> VInt32 (Int32.of_int (read_uint data 0 4 endian))
-  | I64 | U64 | F64 -> VInt64 (Int64.of_int (read_uint data 0 8 endian))
+  | I8 ->
+    let v = Char.code (Bytes.get data 0) in
+    VInt (if v land 0x80 <> 0 then v - 256 else v)
+  | U8 -> VInt (Char.code (Bytes.get data 0))
+  | I16 ->
+    let v = Int64.to_int (read_sint data 0 2 endian) in VInt v
+  | U16 -> VInt (Int64.to_int (read_uint data 0 2 endian))
+  | I32 -> VInt32 (Int64.to_int32 (read_sint data 0 4 endian))
+  | U32 -> VInt32 (Int64.to_int32 (read_uint data 0 4 endian))
+  | F32 -> VFloat (Int32.float_of_bits (Int64.to_int32 (read_uint data 0 4 endian)))
+  | I64 -> VInt64 (read_sint data 0 8 endian)
+  | U64 -> VInt64 (read_uint data 0 8 endian)
+  | F64 -> VFloat (Int64.float_of_bits (read_uint data 0 8 endian))
   | StringType _ -> VString (Bytes.to_string data)
   | BytesType _ -> VBytes data
   | _ -> VObj []
 
 let parse_field_bytes typ endian data offset =
-  let size = size_of_type typ in
+  let size = match typ with
+    | StringType _ | BytesType None -> Bytes.length data - offset
+    | _ -> size_of_type typ
+  in
+  if offset + size > Bytes.length data then
+    raise (Engine_error (Printf.sprintf "Field read out of bounds: offset=%d size=%d len=%d" offset size (Bytes.length data)));
   let buf = Bytes.sub data offset size in
   parse_value typ buf endian
 
@@ -323,10 +364,7 @@ let rec lookup_struct name defs =
   match defs with
   | [] -> raise (Engine_error (Printf.sprintf "Struct '%s' not found" name))
   | (Ast.StructDef s) :: _ when s.name = name ->
-    let members = List.filter_map (function Ast.Field f -> Some f | _ -> None) s.members in
-    if members = [] then
-      raise (Engine_error (Printf.sprintf "Struct '%s' has no fields" name));
-    members
+    List.filter_map (function Ast.Field f -> Some f | _ -> None) s.members
   | _ :: rest -> lookup_struct name rest
 
 let parse_binary schema bytes =

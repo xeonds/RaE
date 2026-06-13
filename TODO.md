@@ -1,21 +1,21 @@
 - [x] AST — clean types, pipeline expression grammar
 - [x] Lexer — case-insensitive keywords
 - [x] Parser — schema + pipeline + @block/@each/@func, 2 expected conflicts
-- [x] Engine — binary LE/BE parse, expression eval, ==, pipeline, struct, array, block, each
-- [x] Main — arg handling, inline/file mode
+- [x] Engine — LE/BE parse, F32/F64 IEEE 754, I8/I16 sign ext, U64 Int64 ops
+- [x] Main — arg handling, inline/file mode, VObj root as pipeline current
 - [x] Endian — per-field [endian = le/be]
 - [x] Nested structs — recursive parse
 - [x] Array — [count = expr], array<Type>, indexing, expand
 - [x] @block — { let id = expr; expr; ... }
 - [x] @each — @each(x in arr) { body }
 - [x] @write(filename) — serialize raw bytes
-- [x] @checksum — byte-sum over any value type
+- [x] @checksum — byte-sum over VObj/VBytes/VString/VArray
 - [x] After/Align/Dynamic offset
-- [x] Multi-expr via ; — .a; .b; .c (each independent current)
-- [x] @echo VBytes/array
-- [x] VInt32/VInt64 arithmetic
-- [x] string/bytes without explicit size
-- [x] Semicolon consistency
+- [x] Multi-expr via ; — .a; .b; .c (each independent)
+- [x] @echo VBytes/array/VObj
+- [x] VInt32/VInt64 mixed arithmetic
+- [x] string/bytes with size — string(5), bytes(5)
+- [x] Bounds check — clean Engine_error on out-of-bounds read
 - [ ] Assignment mutation — .field = value (in-place modify)
-- [ ] Select in pipeline — .xs[] | @select(x > 2)
-- [ ] Endian-aware write — serialize with correct byte order
+- [ ] Variant dispatch — variant(type) routes to correct struct
+- [ ] Template<T> — generic type params
