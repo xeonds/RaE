@@ -29,6 +29,19 @@ dune install
 
 Requires: OCaml 4.14+, Dune 3.0, Menhir 2.1, ppx_deriving 5.1.
 
+## VSCode Extension
+
+```bash
+# Build LSP server
+opam install yojson
+dune build
+
+# Install extension
+ln -s $(pwd)/editors/vscode ~/.vscode/extensions/rae-lsp
+```
+
+Provides `.rae` syntax highlighting and diagnostics via the LSP server at `_build/default/bin/lsp_main.exe`.
+
 ## Quick start
 
 ```bash
