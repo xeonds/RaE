@@ -1,7 +1,8 @@
 open Ast
 
 type input_scheme = File of string | Inline of string
-type config = { scheme: input_scheme; binary_file: string }
+type binary_source = File of string | Stdin
+type config = { scheme: input_scheme; binary: binary_source; output: string option }
 exception Engine_error of string
 
 let construct_defs : Ast.def list ref = ref []
@@ -17,13 +18,6 @@ let read_binary_file filename =
   let bytes = Bytes.create len in really_input ic bytes 0 len; close_in ic; bytes
 
 (* ---------- command line ---------- *)
-let parse_command_line args = match args with
-  | [script; binary_file] ->
-    if Filename.check_suffix script ".RaE" || Filename.check_suffix script ".rae" then
-      { scheme = File script; binary_file }
-    else { scheme = Inline script; binary_file }
-  | _ -> raise (Failure "Usage: rae <script.RaE | \"scheme\"> <binary_file>")
-
 let parse_script_file filename =
   let content = read_file filename in
   if String.length content >= 2 && String.sub content 0 2 = "#!" then

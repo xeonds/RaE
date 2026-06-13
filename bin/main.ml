@@ -1,5 +1,21 @@
 open Rae_lib
 
+let print_usage () =
+  Printf.printf "Usage:\n";
+  Printf.printf "  rae <script.RaE> <binary_file> [-o out]\n";
+  Printf.printf "  rae \"<scheme>\" <binary_file> [-o out]\n";
+  Printf.printf "  cat file.bin | rae <script.RaE> [-o out]\n"
+
+let read_stdin () =
+  let buf = Buffer.create 4096 in
+  let chunk = Bytes.create 4096 in
+  let rec loop () =
+    let n = input stdin chunk 0 4096 in
+    if n > 0 then (Buffer.add_bytes buf (Bytes.sub chunk 0 n); loop ())
+  in
+  (try loop () with End_of_file -> ());
+  Bytes.of_string (Buffer.contents buf)
+
 let parse_and_run config =
   try
     let source =
@@ -10,8 +26,11 @@ let parse_and_run config =
     let processed = Engine.process_imports source in
     let lexbuf = Lexing.from_string processed in
     let program = Parser.program Lexer.token lexbuf in
-    let bytes = Engine.read_binary_file config.Engine.binary_file in
-
+    let bytes = match config.Engine.binary with
+      | Engine.File f -> Engine.read_binary_file f
+      | Engine.Stdin ->
+        (try read_stdin () with End_of_file -> Bytes.empty)
+    in
     match program.files with
     | [] ->
       Printf.eprintf "No file schema defined\n";
@@ -23,6 +42,12 @@ let parse_and_run config =
       let all_defs = (Ast.StructDef { name = file_schema.Ast.name; params = []; members = List.map (fun f -> Ast.Field f) file_schema.Ast.fields; condition = None; loc = file_schema.Ast.loc }) :: file_schema.Ast.definitions in
       Engine.set_construct_defs all_defs;
       let result = Engine.eval_actions program.actions call_env root in
+      (match config.Engine.output with
+       | Some filename ->
+         (match result with
+          | Ast.VBytes b -> let oc = open_out_bin filename in output oc b 0 (Bytes.length b); close_out oc
+          | _ -> ())
+       | None -> ());
       begin match result with
       | Ast.VInt n -> Printf.printf "%d\n" n
       | Ast.VInt32 n -> Printf.printf "%ld\n" n
@@ -38,12 +63,6 @@ let parse_and_run config =
   | Lexer.SyntaxError msg ->
     Printf.eprintf "Lexical error: %s\n" msg;
     exit 1
-  | Ast.Syntax_error (msg, loc) ->
-    let line = loc.loc_start.pos_lnum in
-    let col = loc.loc_start.pos_cnum - loc.loc_start.pos_bol in
-    let end_col = loc.loc_end.pos_cnum - loc.loc_end.pos_bol in
-    Printf.eprintf "Syntax error at line %d, col %d-%d: %s\n" line col end_col msg;
-    exit 1
   | Parser.Error ->
     Printf.eprintf "Syntax error\n";
     exit 1
@@ -54,19 +73,19 @@ let parse_and_run config =
     Printf.eprintf "Error: %s\n" (Printexc.to_string e);
     exit 1
 
-let print_usage () =
-  Printf.printf "Usage:\n";
-  Printf.printf "  rae <script.RaE> <binary_file>\n";
-  Printf.printf "  rae \"<scheme content>\" <binary_file>\n"
-
 let () =
-  match Array.length Sys.argv with
-  | 1 -> print_usage ()
-  | n when n >= 3 ->
-    let args = List.tl (Array.to_list Sys.argv) in
-    let config = Engine.parse_command_line args in
-    parse_and_run config
-  | _ ->
-    Printf.eprintf "Invalid arguments\n";
-    print_usage ();
-    exit 1
+  let args = List.tl (Array.to_list Sys.argv) in
+  let (scheme : Engine.input_scheme), rest = match (args : string list) with
+    | s :: r when Filename.check_suffix s ".RaE" || Filename.check_suffix s ".rae" ->
+      (Engine.File s : Engine.input_scheme), r
+    | s :: r -> (Engine.Inline s : Engine.input_scheme), r
+    | [] -> print_usage (); exit 1
+  in
+  let (binary : Engine.binary_source), output, _ = List.fold_left (fun (bin, out, state) arg ->
+    match state with
+    | 0 when arg = "-o" -> (bin, out, 1)
+    | 1 -> (bin, Some arg, 0)
+    | 0 -> (Engine.File arg, out, 0)
+    | _ -> (bin, out, state)
+  ) ((Engine.Stdin : Engine.binary_source), None, 0) rest in
+  parse_and_run { Engine.scheme = scheme; binary; output }
