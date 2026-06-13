@@ -145,7 +145,18 @@ and eval_expr expr env current = match expr with
   | Construct (name, field_vals, _) ->
     let vals = List.map (fun (k, e) -> (k, eval_expr e env current)) field_vals in
     construct_binary name vals !construct_defs
-  | UnaryOp _ -> VNull
+  | UnaryOp (op, e, _) ->
+    let v = eval_expr e env current in
+    (match op, v with
+     | Neg, VInt n -> VInt (-n)
+     | Neg, VInt32 n -> VInt32 (Int32.neg n)
+     | Neg, VInt64 n -> VInt64 (Int64.neg n)
+     | Neg, VFloat f -> VFloat (-. f)
+     | Not, VInt n -> VInt (if n = 0 then 1 else 0)
+     | BitNot, VInt n -> VInt (lnot n land 0xFF)
+     | BitNot, VInt32 n -> VInt32 (Int32.lognot n)
+     | BitNot, VInt64 n -> VInt64 (Int64.lognot n)
+     | _ -> VNull)
 
 and eval_binary_op op v1 v2 =
   let vi n = VInt n and vi32 n = VInt32 n and vi64 n = VInt64 n in
@@ -166,6 +177,27 @@ and eval_binary_op op v1 v2 =
   | Eq, VInt32 a, VInt b -> vi (if Int32.to_int a=b then 1 else 0) | Eq, VInt a, VInt32 b -> vi (if a=Int32.to_int b then 1 else 0)
   | Eq, VInt64 a, VInt b -> vi (if Int64.to_int a=b then 1 else 0) | Eq, VInt a, VInt64 b -> vi (if a=Int64.to_int b then 1 else 0)
   | Eq, VString a, VString b -> vi (if a=b then 1 else 0)
+  | Neq, VInt a, VInt b -> vi (if a<>b then 1 else 0)
+  | Neq, VInt32 a, VInt32 b -> vi (if a<>b then 1 else 0)
+  | Neq, VInt64 a, VInt64 b -> vi (if a<>b then 1 else 0)
+  | Le, VInt a, VInt b -> vi (if a<=b then 1 else 0)
+  | Le, VInt32 a, VInt32 b -> vi (if a<=b then 1 else 0)
+  | Ge, VInt a, VInt b -> vi (if a>=b then 1 else 0)
+  | Ge, VInt32 a, VInt32 b -> vi (if a>=b then 1 else 0)
+  | And, VInt a, VInt b -> vi (if a<>0 && b<>0 then 1 else 0)
+  | Or, VInt a, VInt b -> vi (if a<>0 || b<>0 then 1 else 0)
+  | BitAnd, VInt a, VInt b -> vi (a land b)
+  | BitAnd, VInt32 a, VInt32 b -> vi32 (Int32.logand a b)
+  | BitAnd, VInt64 a, VInt64 b -> vi64 (Int64.logand a b)
+  | BitXor, VInt a, VInt b -> vi (a lxor b)
+  | BitXor, VInt32 a, VInt32 b -> vi32 (Int32.logxor a b)
+  | BitXor, VInt64 a, VInt64 b -> vi64 (Int64.logxor a b)
+  | LShift, VInt a, VInt b -> vi (a lsl b)
+  | LShift, VInt32 a, VInt b -> vi32 (Int32.shift_left a b)
+  | LShift, VInt64 a, VInt b -> vi64 (Int64.shift_left a b)
+  | RShift, VInt a, VInt b -> vi (a lsr b)
+  | RShift, VInt32 a, VInt b -> vi32 (Int32.shift_right_logical a b)
+  | RShift, VInt64 a, VInt b -> vi64 (Int64.shift_right_logical a b)
   | _ -> VNull
 
 and eval_builtin name args env current = match name, args with

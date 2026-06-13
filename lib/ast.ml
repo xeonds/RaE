@@ -13,7 +13,8 @@ type loc = {
 type identifier = string
 
 type binary_op = Add | Sub | Mul | Div | Mod | Eq | Neq | Lt | Le | Gt | Ge | And | Or
-type unary_op = Neg | Not
+               | BitAnd | BitOr | BitXor | LShift | RShift
+type unary_op = Neg | Not | BitNot
 
 type expr =
   | IntLit of int * loc

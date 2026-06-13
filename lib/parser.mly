@@ -22,6 +22,7 @@ let syntax_error msg sp ep = raise (Syntax_error (msg, mk_loc sp ep))
 %token LBRACE RBRACE LPAREN RPAREN LBRACK RBRACK
 %token LT GT EQEQ EQUAL COLON SEMICOLON COMMA DOT PIPE AT BANG
 %token PLUS MINUS STAR SLASH
+%token NEQ LE GE BAND BXOR LSHIFT RSHIFT TILDE AND OR
 %token FATARROW EOF
 
 %start <Ast.program> program
@@ -207,13 +208,31 @@ pipe_expr:
   ;
 
 assign_expr:
-  | e = cmp_expr EQUAL r = cmp_expr
+  | e = logic_expr EQUAL r = logic_expr
     { Assign(e, r, mk_loc $startpos $endpos) }
+  | e = logic_expr { e }
+  ;
+
+logic_expr:
+  | e = cmp_expr op = logic_op r = logic_expr
+    { BinaryOp(op, e, r, mk_loc $startpos $endpos) }
   | e = cmp_expr { e }
   ;
 
 cmp_expr:
-  | e = add_expr op = cmp_op r = add_expr
+  | e = bit_expr op = cmp_op r = bit_expr
+    { BinaryOp(op, e, r, mk_loc $startpos $endpos) }
+  | e = bit_expr { e }
+  ;
+
+bit_expr:
+  | e = shift_expr op = bit_op r = bit_expr
+    { BinaryOp(op, e, r, mk_loc $startpos $endpos) }
+  | e = shift_expr { e }
+  ;
+
+shift_expr:
+  | e = add_expr op = shift_op r = shift_expr
     { BinaryOp(op, e, r, mk_loc $startpos $endpos) }
   | e = add_expr { e }
   ;
@@ -302,18 +321,33 @@ at_func_name:
 
 (* ---------- operators ---------- *)
 
+logic_op:
+  | AND { And } | OR { Or }
+  ;
+
 cmp_op:
-  | EQEQ { Eq } | LT { Lt } | GT { Gt }
+  | EQEQ { Eq } | NEQ { Neq }
+  | LT   { Lt } | LE   { Le }
+  | GT   { Gt } | GE   { Ge }
   ;
 
 add_op:
   | PLUS { Add } | MINUS { Sub }
   ;
 
+shift_op:
+  | LSHIFT { LShift } | RSHIFT { RShift }
+  ;
+
+bit_op:
+  | BAND { BitAnd } | BXOR { BitXor }
+  ;
+
 mul_op:
   | STAR { Mul } | SLASH { Div }
   ;
-
 unary_op:
-  | BANG { Not } | MINUS { Neg }
+  | BANG  { Not }
+  | MINUS { Neg }
+  | TILDE { BitNot }
   ;

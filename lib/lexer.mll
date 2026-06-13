@@ -77,6 +77,17 @@ rule token = parse
   | "|"        { PIPE }
   | "@"        { AT }
   | "=>"       { FATARROW }
+  | "&&"       { AND }
+  | "||"       { OR }
+  | "!="       { NEQ }
+  | "<="       { LE }
+  | ">="       { GE }
+  | "<<"       { LSHIFT }
+  | ">>"       { RSHIFT }
+  | "&"        { BAND }
+  | "|"        { PIPE }
+  | "^"        { BXOR }
+  | "~"        { TILDE }
   | "!"        { BANG }
   | "+"        { PLUS }
   | "-"        { MINUS }
