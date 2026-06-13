@@ -258,14 +258,17 @@ and write_value typ v = match typ with
 and construct_binary name field_vals struct_defs =
   let info = try lookup_struct name struct_defs
     with _ -> raise (Engine_error (Printf.sprintf "Struct '%s' not found for construction" name)) in
-  let flat_fields = ref [] in
-  List.iter (fun f -> flat_fields := f :: !flat_fields) info.fields;
-  let total = List.fold_left (fun acc f ->
-    let sz = size_of_type f.field_type in
-    let off = match f.offset with Fixed n -> n + sz | _ -> 0 in max acc off) 0 !flat_fields in
-  let buf = Bytes.make total '\000' in
+  let total = ref 0 in
+  let cur_off = ref 0 in
   List.iter (fun f ->
-    let offset = match f.offset with Fixed n -> n | _ -> 0 in
+    let sz = size_of_type f.field_type in
+    let off = match f.offset with Fixed n -> n | After _ -> !cur_off | _ -> 0 in
+    total := max !total (off + sz);
+    cur_off := off + sz) info.fields;
+  let buf = Bytes.make !total '\000' in
+  cur_off := 0;
+  List.iter (fun f ->
+    let offset = match f.offset with Fixed n -> n | After _ -> !cur_off | _ -> 0 in
     let evald = (try List.assoc f.name field_vals
       with Not_found -> raise (Engine_error (Printf.sprintf "Field '%s' not provided for construction" f.name))) in
     let raw = match f.field_type with
@@ -282,7 +285,8 @@ and construct_binary name field_vals struct_defs =
       | _ -> write_value f.field_type evald in
     let field_bytes = let is_be = List.exists (fun attr -> match attr with Ast.Endian (BE, _) -> true | _ -> false) f.attributes in
       if is_be then reverse_bytes raw else raw in
-    Bytes.blit field_bytes 0 buf offset (Bytes.length field_bytes)) !flat_fields;
+    Bytes.blit field_bytes 0 buf offset (Bytes.length field_bytes);
+    cur_off := offset + Bytes.length field_bytes) info.fields;
   VBytes buf
 
 and eval_actions actions env current_val =
@@ -300,11 +304,14 @@ let values_equal a b = match a, b with
   | _ -> false
 
 (* ---------- schema evaluation ---------- *)
-let compute_offset offset_expr prev_offset base_offset env field_ends = match offset_expr with
+let compute_offset off_expr prev_offset base_offset env field_ends = match off_expr with
   | Fixed n -> base_offset + n
-  | After name -> (try List.assoc name field_ends with Not_found -> prev_offset)
+  | After name ->
+    (if name = "" then prev_offset
+     else try List.assoc name field_ends with Not_found -> prev_offset)
   | Align e -> let n = match eval_expr e env (ref VNull) with VInt n -> n | _ -> 1 in ((prev_offset + n - 1) / n) * n
-  | Dynamic e -> match eval_expr e env (ref VNull) with VInt n -> n | _ -> prev_offset
+  | Dynamic e ->
+    match eval_expr e env (ref VNull) with VInt n -> n | _ -> prev_offset
 
 let field_endian attrs =
   List.fold_left (fun acc attr -> match attr with Ast.Endian (k,_) -> Some k | _ -> acc) None attrs

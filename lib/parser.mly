@@ -128,6 +128,13 @@ field_decl:
     { { name; field_type = typ; expects = exp;
         attributes = Option.value attrs ~default:[]; offset = off;
         loc = mk_loc $startpos $endpos } }
+  | name = IDENT COLON typ = type_expr
+    attrs = option(attributes)
+    exp = option(expects)
+    option(SEMICOLON)
+    { { name; field_type = typ; expects = exp;
+        attributes = Option.value attrs ~default:[]; offset = After "";
+        loc = mk_loc $startpos $endpos } }
   ;
 
 expects:
