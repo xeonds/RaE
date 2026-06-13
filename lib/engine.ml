@@ -47,7 +47,8 @@ let write_uint value size = let buf = Bytes.make size '\000' in let v = ref valu
 let value_to_bytes v = match v with
   | VBytes b -> b | VString s -> Bytes.of_string s
   | VInt n -> write_uint (Int64.of_int n) (if n < 256 then 1 else if n < 65536 then 2 else 4)
-  | VInt32 n -> Bytes.of_string (Int32.to_string n) | VInt64 n -> Bytes.of_string (Int64.to_string n)
+  | VInt32 n -> write_uint (Int64.of_int32 n) 4
+  | VInt64 n -> write_uint n 8
   | VArray items -> let buf = Buffer.create 64 in
     List.iter (fun item -> match item with VInt n -> Buffer.add_string buf (string_of_int n) | VInt32 n -> Buffer.add_string buf (Int32.to_string n) | VInt64 n -> Buffer.add_string buf (Int64.to_string n) | VString s -> Buffer.add_string buf s | _ -> ()) items;
     Bytes.of_string (Buffer.contents buf)
@@ -76,13 +77,20 @@ let rec lookup_struct name defs = match defs with
       variants = List.filter_map (function Ast.Variant (t,c,_) -> Some (t,c) | _ -> None) s.members }
   | _ :: rest -> lookup_struct name rest
 
+let resolve_type = function
+  | Ast.StructType "u8" -> U8 | Ast.StructType "u16" -> U16 | Ast.StructType "u32" -> U32 | Ast.StructType "u64" -> U64
+  | Ast.StructType "i8" -> I8 | Ast.StructType "i16" -> I16 | Ast.StructType "i32" -> I32 | Ast.StructType "i64" -> I64
+  | Ast.StructType "f32" -> F32 | Ast.StructType "f64" -> F64
+  | t -> t
+
 let rec lookup_template name args_val defs = match defs with
   | [] -> raise (Engine_error (Printf.sprintf "Template '%s' not found" name))
   | (Ast.TemplateDef t) :: _ when t.name = name ->
     let subst = try List.combine t.params args_val with Invalid_argument _ -> raise (Engine_error "Template arg count mismatch") in
     let rec subst_type = function
-      | Ast.StructType n -> (try List.assoc n subst with Not_found -> Ast.StructType n)
-      | Ast.ArrayType elem -> Ast.ArrayType (subst_type elem) | other -> other in
+      | Ast.StructType n -> resolve_type (try List.assoc n subst with Not_found -> Ast.StructType n)
+      | Ast.ArrayType elem -> Ast.ArrayType (subst_type elem)
+      | other -> other in
     List.map (fun f -> { f with field_type = subst_type f.field_type }) t.members
   | _ :: rest -> lookup_template name args_val rest
 
@@ -142,6 +150,7 @@ and eval_binary_op op v1 v2 =
   | Le, VInt a, VInt b -> vi (if a<=b then 1 else 0) | Le, VInt32 a, VInt32 b -> vi (if a<=b then 1 else 0) | Ge, VInt a, VInt b -> vi (if a>=b then 1 else 0) | Ge, VInt32 a, VInt32 b -> vi (if a>=b then 1 else 0)
   | And, VInt a, VInt b -> vi (if a<>0 && b<>0 then 1 else 0) | Or, VInt a, VInt b -> vi (if a<>0 || b<>0 then 1 else 0)
   | BitAnd, VInt a, VInt b -> vi (a land b) | BitAnd, VInt32 a, VInt32 b -> vi32 (Int32.logand a b) | BitAnd, VInt64 a, VInt64 b -> vi64 (Int64.logand a b)
+  | BitOr, VInt a, VInt b -> vi (a lor b) | BitOr, VInt32 a, VInt32 b -> vi32 (Int32.logor a b) | BitOr, VInt64 a, VInt64 b -> vi64 (Int64.logor a b)
   | BitXor, VInt a, VInt b -> vi (a lxor b) | BitXor, VInt32 a, VInt32 b -> vi32 (Int32.logxor a b) | BitXor, VInt64 a, VInt64 b -> vi64 (Int64.logxor a b)
   | LShift, VInt a, VInt b -> vi (a lsl b) | LShift, VInt32 a, VInt b -> vi32 (Int32.shift_left a b) | LShift, VInt64 a, VInt b -> vi64 (Int64.shift_left a b)
   | RShift, VInt a, VInt b -> vi (a lsr b) | RShift, VInt32 a, VInt b -> vi32 (Int32.shift_right_logical a b) | RShift, VInt64 a, VInt b -> vi64 (Int64.shift_right_logical a b) | _ -> VNull

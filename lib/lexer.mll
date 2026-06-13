@@ -85,6 +85,11 @@ rule token = parse
   | ">="       { GE }
   | "<<"       { LSHIFT }
   | ">>"       { RSHIFT }
+  | "land"|"LAND" { BAND }
+  | "lor"|"LOR"   { BOR }
+  | "lxor"|"LXOR" { BXOR }
+  | "lsl"|"LSL"   { LSHIFT }
+  | "lsr"|"LSR"   { RSHIFT }
   | "&"        { BAND }
   | "|"        { PIPE }
   | "^"        { BXOR }

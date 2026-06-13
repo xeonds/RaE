@@ -20,7 +20,7 @@ let mk_loc sp ep =
 %token LBRACE RBRACE LPAREN RPAREN LBRACK RBRACK
 %token LT GT EQEQ EQUAL COLON SEMICOLON COMMA DOT PIPE AT BANG
 %token PLUS MINUS STAR SLASH
-%token NEQ LE GE BAND BXOR LSHIFT RSHIFT TILDE AND OR
+%token NEQ LE GE BAND BOR BXOR LSHIFT RSHIFT TILDE AND OR
 %token FATARROW EOF
 
 %start <Ast.program> program
@@ -62,7 +62,14 @@ struct_condition:
   ;
 
 type_params:
-  | LT ps = separated_list(COMMA, IDENT) GT { ps }
+  | LT ps = separated_list(COMMA, type_param) GT { ps }
+  ;
+
+type_param:
+  | IDENT { $1 }
+  | I8 { "i8" } | I16 { "i16" } | I32 { "i32" } | I64 { "i64" }
+  | U8 { "u8" } | U16 { "u16" } | U32 { "u32" } | U64 { "u64" }
+  | F32 { "f32" } | F64 { "f64" }
   ;
 
 struct_item:
@@ -335,7 +342,7 @@ shift_op:
   ;
 
 bit_op:
-  | BAND { BitAnd } | BXOR { BitXor }
+  | BAND { BitAnd } | BXOR { BitXor } | BOR { BitOr }
   ;
 
 mul_op:
