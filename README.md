@@ -5,12 +5,26 @@ Parse, inspect, mutate, and construct binary files with a declarative schema and
 ## Install
 
 ```bash
+# One-time: OCaml
+opam switch create 4.14.0 && eval $(opam env)
+
+# Clone & install deps
 git clone https://github.com/xeonds/RaE.git && cd RaE
-git checkout v1.0.0
+opam install . --deps-only
+
+# Build & run
 dune build
+dune exec rae -- "file F { a: u8; } .a" <(printf '\x2A')   # → 42
 ```
 
-Requires OCaml 4.14+, Dune 3.0.
+Or install globally:
+
+```bash
+dune install
+# now `rae` is on your PATH
+```
+
+Requires: OCaml 4.14+, Dune 3.0, Menhir 2.1, ppx_deriving 5.1.
 
 ## Quick start
 
