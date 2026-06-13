@@ -32,15 +32,17 @@ Requires: OCaml 4.14+, Dune 3.0, Menhir 2.1, ppx_deriving 5.1.
 ## VSCode Extension
 
 ```bash
-# Build LSP server
-opam install yojson
-dune build
+make vsix                         # → _build/default/rae-lsp.vsix
+# Then in VS Code: Ctrl+Shift+P → "Install from VSIX..."
+```
 
-# Install extension
+Or for local development:
+
+```bash
 ln -s $(pwd)/editors/vscode ~/.vscode/extensions/rae-lsp
 ```
 
-Provides `.rae` syntax highlighting and diagnostics via the LSP server at `_build/default/bin/lsp_main.exe`.
+Provides `.rae` syntax highlighting and diagnostics via LSP.
 
 ## Quick start
 

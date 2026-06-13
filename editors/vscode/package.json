@@ -2,7 +2,7 @@
   "name": "rae-lsp",
   "displayName": "RaE Language Support",
   "description": "Language support for RaE (binary schema DSL) — syntax highlighting + diagnostics via LSP",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "publisher": "rae",
   "license": "MIT",
   "engines": {

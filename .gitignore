@@ -3,3 +3,4 @@ parser.automaton
 parser.conflicts
 *.bin
 out*
+editors/vscode/rae-lsp
