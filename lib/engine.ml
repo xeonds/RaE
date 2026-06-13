@@ -209,7 +209,7 @@ let parse_value typ data endian = match typ with
   | I64 -> VInt64 (read_sint data 0 8 endian) | U64 -> VInt64 (read_uint data 0 8 endian)
   | F64 -> VFloat (Int64.float_of_bits (read_uint data 0 8 endian))
   | StringType _ -> VString (Bytes.to_string data) | BytesType _ -> VBytes data
-  | _ -> raise (Engine_error "Cannot parse type")
+      | _ -> raise (Engine_error "Cannot parse type")
 
 let parse_field_bytes typ endian data offset = let size = match typ with StringType _|BytesType None -> Bytes.length data - offset | _ -> size_of_type typ in if offset + size > Bytes.length data then raise (Engine_error (Printf.sprintf "Field read out of bounds: offset=%d size=%d len=%d" offset size (Bytes.length data))); let buf = Bytes.sub data offset size in parse_value typ buf endian
 
