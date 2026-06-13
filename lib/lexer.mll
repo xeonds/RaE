@@ -39,6 +39,7 @@ rule token = parse
   | "new"|"NEW" { NEW }
   | "le"|"LE" { LEND }
   | "be"|"BE" { BEND }
+  | "endian"|"ENDIAN" { ENDIAN }
   | "let"|"LET" { LET }
   | "in"|"IN"   { IN }
   | "new"|"NEW" { NEW }
