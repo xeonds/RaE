@@ -39,23 +39,16 @@ let process_imports content =
 let format_value v = match v with
   | VInt n -> string_of_int n | VInt32 n -> Int32.to_string n | VInt64 n -> Int64.to_string n | VFloat f -> string_of_float f
   | VString s -> s | VBytes b -> Printf.sprintf "bytes(%d)" (Bytes.length b)
-  | VArray items -> Printf.sprintf "[%d]" (List.length items)
-  | VObj fields -> Printf.sprintf "<obj %d>" (List.length fields)
-  | VNull -> "null"
+  | VArray items -> Printf.sprintf "[%d]" (List.length items) | VObj fields -> Printf.sprintf "<obj %d>" (List.length fields) | VNull -> "null"
+
 let write_uint value size = let buf = Bytes.make size '\000' in let v = ref value in for i = 0 to size - 1 do Bytes.set buf i (Char.chr (Int64.to_int (Int64.logand !v 0xFFL))); v := Int64.shift_right_logical !v 8 done; buf
 
 let value_to_bytes v = match v with
   | VBytes b -> b | VString s -> Bytes.of_string s
   | VInt n -> write_uint (Int64.of_int n) (if n < 256 then 1 else if n < 65536 then 2 else 4)
-  | VInt32 n -> write_uint (Int64.of_int32 n) 4
-  | VInt64 n -> write_uint n 8
-  | VArray items -> let buf = Buffer.create 64 in
-    List.iter (fun item -> match item with VInt n -> Buffer.add_string buf (string_of_int n) | VInt32 n -> Buffer.add_string buf (Int32.to_string n) | VInt64 n -> Buffer.add_string buf (Int64.to_string n) | VString s -> Buffer.add_string buf s | _ -> ()) items;
-    Bytes.of_string (Buffer.contents buf)
-  | VObj fields -> let buf = Buffer.create 128 in
-    List.iter (fun (k,v) -> Buffer.add_string buf k; Buffer.add_string buf "=";
-      match v with VInt n -> Buffer.add_string buf (string_of_int n) | VString s -> Buffer.add_string buf s | _ -> ()) (List.rev fields);
-    Bytes.of_string (Buffer.contents buf)
+  | VInt32 n -> write_uint (Int64.of_int32 n) 4 | VInt64 n -> write_uint n 8
+  | VArray items -> let buf = Buffer.create 64 in List.iter (fun item -> match item with VInt n -> Buffer.add_string buf (string_of_int n) | VInt32 n -> Buffer.add_string buf (Int32.to_string n) | VInt64 n -> Buffer.add_string buf (Int64.to_string n) | VString s -> Buffer.add_string buf s | _ -> ()) items; Bytes.of_string (Buffer.contents buf)
+  | VObj fields -> let buf = Buffer.create 128 in List.iter (fun (k,v) -> Buffer.add_string buf k; Buffer.add_string buf "="; match v with VInt n -> Buffer.add_string buf (string_of_int n) | VString s -> Buffer.add_string buf s | _ -> ()) (List.rev fields); Bytes.of_string (Buffer.contents buf)
   | VNull -> Bytes.of_string "null" | VFloat f -> Bytes.of_string (string_of_float f)
 
 let serialize_value v _env = match v with VBytes b -> b | _ -> value_to_bytes v
@@ -67,8 +60,14 @@ let crc32 bytes =
   let crc = ref 0xFFFFFFFFl in for i = 0 to Bytes.length bytes - 1 do let idx = Int32.to_int (Int32.logxor !crc (Int32.of_int (Char.code (Bytes.get bytes i)))) land 0xFF in crc := Int32.logxor (Int32.shift_right_logical !crc 8) t.(idx) done;
   Int32.logxor !crc 0xFFFFFFFFl
 
-(* ---------- type lookup (Q6: defs list is O(n) but schemas are small) ---------- *)
+(* ---------- type lookup ---------- *)
 type struct_info = { fields: field_decl list; variants: (identifier * variant_case list) list }
+
+let resolve_type = function
+  | Ast.StructType "u8" -> U8 | Ast.StructType "u16" -> U16 | Ast.StructType "u32" -> U32 | Ast.StructType "u64" -> U64
+  | Ast.StructType "i8" -> I8 | Ast.StructType "i16" -> I16 | Ast.StructType "i32" -> I32 | Ast.StructType "i64" -> I64
+  | Ast.StructType "f32" -> F32 | Ast.StructType "f64" -> F64
+  | t -> t
 
 let rec lookup_struct name defs = match defs with
   | [] -> raise (Engine_error (Printf.sprintf "Struct '%s' not found" name))
@@ -77,20 +76,13 @@ let rec lookup_struct name defs = match defs with
       variants = List.filter_map (function Ast.Variant (t,c,_) -> Some (t,c) | _ -> None) s.members }
   | _ :: rest -> lookup_struct name rest
 
-let resolve_type = function
-  | Ast.StructType "u8" -> U8 | Ast.StructType "u16" -> U16 | Ast.StructType "u32" -> U32 | Ast.StructType "u64" -> U64
-  | Ast.StructType "i8" -> I8 | Ast.StructType "i16" -> I16 | Ast.StructType "i32" -> I32 | Ast.StructType "i64" -> I64
-  | Ast.StructType "f32" -> F32 | Ast.StructType "f64" -> F64
-  | t -> t
-
 let rec lookup_template name args_val defs = match defs with
   | [] -> raise (Engine_error (Printf.sprintf "Template '%s' not found" name))
   | (Ast.TemplateDef t) :: _ when t.name = name ->
     let subst = try List.combine t.params args_val with Invalid_argument _ -> raise (Engine_error "Template arg count mismatch") in
     let rec subst_type = function
       | Ast.StructType n -> resolve_type (try List.assoc n subst with Not_found -> Ast.StructType n)
-      | Ast.ArrayType elem -> Ast.ArrayType (subst_type elem)
-      | other -> other in
+      | Ast.ArrayType elem -> Ast.ArrayType (subst_type elem) | other -> other in
     List.map (fun f -> { f with field_type = subst_type f.field_type }) t.members
   | _ :: rest -> lookup_template name args_val rest
 
@@ -121,8 +113,7 @@ and eval_expr expr env current = match expr with
   | Pipe (e1, e2, _) -> eval_expr e2 env (ref (eval_expr e1 env current))
   | BlockLit (lets, body, _) ->
     let env' = List.fold_left (fun env (id,e) -> (id, eval_expr e env current) :: env) env lets in
-    let rec run = function [] -> VNull | [e] -> eval_expr e env' current | e :: rest -> ignore (eval_expr e env' current); run rest in
-    run body
+    let rec run = function [] -> VNull | [e] -> eval_expr e env' current | e :: rest -> ignore (eval_expr e env' current); run rest in run body
   | Assign (e1, e2, _) -> let rhs = eval_expr e2 env current in current := set_path e1 env !current rhs; !current
   | Construct (name, field_vals, _) ->
     let vals = List.map (fun (k, e) -> (k, eval_expr e env current)) field_vals in
@@ -171,33 +162,46 @@ and eval_builtin name args env current = match name, args with
   | _ -> VNull
 
 and write_value typ v = match typ with
-  | I8|U8 -> (match v with VInt n -> write_uint (Int64.of_int n) 1 | _ -> Bytes.make 1 '\000') | I16|U16 -> (match v with VInt n -> write_uint (Int64.of_int n) 2 | _ -> Bytes.make 2 '\000')
-  | I32|U32 -> (match v with VInt32 n -> write_uint (Int64.of_int32 n) 4 | VInt n -> write_uint (Int64.of_int n) 4 | _ -> Bytes.make 4 '\000') | F32 -> (match v with VFloat f -> write_uint (Int64.bits_of_float f) 4 | _ -> Bytes.make 4 '\000')
-  | I64|U64 -> (match v with VInt64 n -> write_uint n 8 | VInt n -> write_uint (Int64.of_int n) 8 | _ -> Bytes.make 8 '\000') | F64 -> (match v with VFloat f -> write_uint (Int64.bits_of_float f) 8 | _ -> Bytes.make 8 '\000')
-  | StringType _|BytesType _ -> (match v with VString s -> Bytes.of_string s | VBytes b -> b | _ -> Bytes.empty)
+  | I8|U8 -> (match v with VInt n -> write_uint (Int64.of_int n) 1 | _ -> Bytes.make 1 '\000')
+  | I16|U16 -> (match v with VInt n -> write_uint (Int64.of_int n) 2 | _ -> Bytes.make 2 '\000')
+  | I32|U32 -> (match v with VInt32 n -> write_uint (Int64.of_int32 n) 4 | VInt n -> write_uint (Int64.of_int n) 4 | _ -> Bytes.make 4 '\000')
+  | F32 -> (match v with VFloat f -> write_uint (Int64.bits_of_float f) 4 | _ -> Bytes.make 4 '\000')
+  | I64|U64 -> (match v with VInt64 n -> write_uint n 8 | VInt n -> write_uint (Int64.of_int n) 8 | _ -> Bytes.make 8 '\000')
+  | F64 -> (match v with VFloat f -> write_uint (Int64.bits_of_float f) 8 | _ -> Bytes.make 8 '\000')
+  | StringType _|BytesType _ ->
+    let raw = match v with VString s -> Bytes.of_string s | VBytes b -> b | _ -> Bytes.empty in
+    let sz = size_of_type typ in
+    if sz > 0 && Bytes.length raw > sz then Bytes.sub raw 0 sz
+    else if sz > 0 && Bytes.length raw < sz then
+      let padded = Bytes.make sz '\000' in Bytes.blit raw 0 padded 0 (Bytes.length raw); padded
+    else raw
+  | StructType sn -> (match v with VObj fields ->
+      (match construct_binary sn fields !construct_defs with VBytes b -> b | _ -> Bytes.empty)
+    | VBytes b -> b | _ -> Bytes.empty)
   | _ -> raise (Engine_error "Cannot serialize type")
 
 and construct_binary name field_vals struct_defs =
-  let info = try lookup_struct name struct_defs with _ -> raise (Engine_error (Printf.sprintf "Struct '%s' not found for construction" name)) in
+  let info : struct_info = try lookup_struct name struct_defs with _ -> raise (Engine_error (Printf.sprintf "Struct '%s' not found for construction" name)) in
   let total = ref 0 in let cur_off = ref 0 in
-  List.iter (fun f ->
-    let sz = match f.field_type with
+  List.iter (fun (fld : field_decl) ->
+    let evald = (try List.assoc fld.name field_vals with Not_found -> raise (Engine_error (Printf.sprintf "Field '%s' not provided for construction" fld.name))) in
+    let sz = match fld.field_type with
       | Ast.ArrayType elem ->
-        let count = List.fold_left (fun acc attr -> match attr with Ast.Count (IntLit(n,_),_) -> n | _ -> acc) 1 f.attributes in
-        count * size_of_type elem
-      | _ -> size_of_type f.field_type in
-    let off = match f.offset with Fixed n -> n | _ -> !cur_off in total := max !total (off + sz); cur_off := off + sz) info.fields;
+        (match evald with VArray items -> List.fold_left (fun acc item -> acc + Bytes.length (write_value elem item)) 0 items | _ -> 0)
+      | _ -> Bytes.length (write_value fld.field_type evald) in
+    let off = match fld.offset with Fixed n -> n | _ -> !cur_off in total := max !total (off + sz); cur_off := off + sz) info.fields;
   let buf = Bytes.make !total '\000' in cur_off := 0; let checksum_fields = ref [] in
-  List.iter (fun f -> let offset = match f.offset with Fixed n -> n | _ -> !cur_off in
-    (match List.find_map (fun attr -> match attr with Ast.Checksum (_,_) -> Some offset | _ -> None) f.attributes with Some cs_off -> checksum_fields := (cs_off, f) :: !checksum_fields | None -> ());
-    let evald = (try List.assoc f.name field_vals with Not_found -> raise (Engine_error (Printf.sprintf "Field '%s' not provided for construction" f.name))) in
-    let raw = match f.field_type with
-      | Ast.StructType sn -> (match evald with VObj sub -> (match construct_binary sn sub struct_defs with VBytes b -> b | _ -> Bytes.empty) | VBytes b -> b | _ -> raise (Engine_error (Printf.sprintf "Struct field '%s' requires VObj or VBytes" f.name)))
+  List.iter (fun (fld : field_decl) ->
+    let offset = match fld.offset with Fixed n -> n | _ -> !cur_off in
+    (match List.find_map (fun attr -> match attr with Ast.Checksum (_,_) -> Some offset | _ -> None) fld.attributes with Some cs_off -> checksum_fields := (cs_off, fld) :: !checksum_fields | None -> ());
+    let evald = (try List.assoc fld.name field_vals with Not_found -> raise (Engine_error (Printf.sprintf "Field '%s' not provided for construction" fld.name))) in
+    let raw = match fld.field_type with
+      | Ast.StructType sn -> (match evald with VObj sub -> (match construct_binary sn sub struct_defs with VBytes b -> b | _ -> Bytes.empty) | VBytes b -> b | _ -> raise (Engine_error (Printf.sprintf "Struct field '%s' requires VObj or VBytes" fld.name)))
       | Ast.ArrayType elem -> (match evald with VArray items -> let buf2 = Buffer.create 256 in List.iter (fun item -> Buffer.add_bytes buf2 (write_value elem item)) items; Bytes.of_string (Buffer.contents buf2) | _ -> raise (Engine_error "Construction of array requires VArray value"))
-      | _ -> write_value f.field_type evald in
-    let field_bytes = if List.exists (fun attr -> match attr with Ast.Endian (BE,_) -> true | _ -> false) f.attributes then reverse_bytes raw else raw in
+      | _ -> write_value fld.field_type evald in
+    let field_bytes = if List.exists (fun attr -> match attr with Ast.Endian (BE,_) -> true | _ -> false) fld.attributes then reverse_bytes raw else raw in
     Bytes.blit field_bytes 0 buf offset (Bytes.length field_bytes); cur_off := offset + Bytes.length field_bytes) info.fields;
-  List.iter (fun (cs_offset, _f) -> let cs_val = crc32 (Bytes.sub buf 0 !cur_off) in Bytes.blit (write_uint (Int64.of_int32 cs_val) 4) 0 buf cs_offset (min 4 (Bytes.length buf - cs_offset))) !checksum_fields;
+  List.iter (fun (cs_offset, _fld) -> let cs_val = crc32 (Bytes.sub buf 0 !cur_off) in Bytes.blit (write_uint (Int64.of_int32 cs_val) 4) 0 buf cs_offset (min 4 (Bytes.length buf - cs_offset))) !checksum_fields;
   VBytes buf
 
 and eval_actions actions env current_val =
@@ -227,7 +231,7 @@ let parse_value typ data endian = match typ with
   | I64 -> VInt64 (read_sint data 0 8 endian) | U64 -> VInt64 (read_uint data 0 8 endian)
   | F64 -> VFloat (Int64.float_of_bits (read_uint data 0 8 endian))
   | StringType _ -> VString (Bytes.to_string data) | BytesType _ -> VBytes data
-      | _ -> raise (Engine_error "Cannot parse type")
+  | _ -> raise (Engine_error "Cannot parse type")
 
 let parse_field_bytes typ endian data offset = let size = match typ with StringType _|BytesType None -> Bytes.length data - offset | _ -> size_of_type typ in if offset + size > Bytes.length data then raise (Engine_error (Printf.sprintf "Field read out of bounds: offset=%d size=%d len=%d" offset size (Bytes.length data))); let buf = Bytes.sub data offset size in parse_value typ buf endian
 
@@ -235,11 +239,36 @@ let parse_binary schema bytes =
   let struct_registry = schema.definitions in
   let rec parse_fields fields data base_offset prev_offset env field_ends = match fields with
     | [] -> (env, prev_offset, field_ends)
-    | f :: rest -> let offset = compute_offset f.offset prev_offset base_offset env field_ends in let endian = ref None in List.iter (fun attr -> match attr with Ast.Endian (BE,_) -> endian := Some BE | _ -> ()) f.attributes; let val_, size = parse_field f data offset env !endian in let new_env = (f.name, val_) :: env in let new_ends = (f.name, offset + size) :: field_ends in (match f.expects with Some e -> let expected = eval_expr e new_env (ref VNull) in if not (values_equal val_ expected) then raise (Engine_error (Printf.sprintf "Field '%s' expected value doesn't match" f.name)) | None -> ()); parse_fields rest data base_offset (offset + size) new_env new_ends
+    | f :: rest ->
+      let offset = compute_offset f.offset prev_offset base_offset env field_ends in
+      let endian = ref None in List.iter (fun attr -> match attr with Ast.Endian (BE,_) -> endian := Some BE | _ -> ()) f.attributes;
+      let val_, size = parse_field f data offset env !endian in
+      let new_env = (f.name, val_) :: env in let new_ends = (f.name, offset + size) :: field_ends in
+      (match f.expects with Some e -> let expected = eval_expr e new_env (ref VNull) in if not (values_equal val_ expected) then raise (Engine_error (Printf.sprintf "Field '%s' expected value doesn't match" f.name)) | None -> ());
+      parse_fields rest data base_offset (offset + size) new_env new_ends
   and parse_field f data offset env endian = match f.field_type with
-    | Ast.TemplateType (name, args) -> let members = lookup_template name (List.map (fun a -> Ast.StructType a) args) struct_registry in let struct_env, _, _ = parse_fields members data offset offset [] [] in (VObj struct_env, 0)
-    | Ast.StructType name -> let info = lookup_struct name struct_registry in let struct_env, final_off, struct_ends = parse_fields info.fields data offset offset [] [] in (dispatch_variants info data offset struct_env struct_ends, final_off - offset)
-    | Ast.ArrayType elem_type -> let count = ref 1 in let cur = ref (VObj env) in List.iter (fun attr -> match attr with Ast.Count (expr,_) -> (match eval_expr expr env cur with VInt n -> count := n | _ -> ()) | _ -> ()) f.attributes; let elems = ref [] in let off = ref offset in for _i = 1 to !count do let v, sz = match elem_type with Ast.StructType name -> let info = lookup_struct name struct_registry in let env', fo, _ = parse_fields info.fields data !off !off [] [] in (VObj env', fo - !off) | _ -> let bty = parse_field_bytes elem_type endian data !off in (bty, size_of_type elem_type) in elems := v :: !elems; off := !off + sz done; (VArray (List.rev !elems), !off - offset)
+    | Ast.TemplateType (name, args) ->
+      let members = lookup_template name (List.map (fun a -> Ast.StructType a) args) struct_registry in
+      let struct_env, _, _ = parse_fields members data offset offset [] [] in (VObj struct_env, 0)
+    | Ast.StructType name ->
+      let info = lookup_struct name struct_registry in
+      let struct_env, final_off, struct_ends = parse_fields info.fields data offset offset [] [] in
+      (dispatch_variants info data offset struct_env struct_ends, final_off - offset)
+    | Ast.ArrayType elem_type ->
+      let count = ref 1 in let cur = ref (VObj env) in
+      List.iter (fun attr -> match attr with Ast.Count (expr,_) -> (match eval_expr expr env cur with VInt n -> count := n | _ -> ()) | _ -> ()) f.attributes;
+      let elems = ref [] in let off = ref offset in
+      for _i = 1 to !count do
+        let v, sz = match elem_type with
+          | Ast.StructType name -> let info = lookup_struct name struct_registry in let env', fo, _ = parse_fields info.fields data !off !off [] [] in (VObj env', fo - !off)
+          | _ -> let bty = parse_field_bytes elem_type endian data !off in (bty, size_of_type elem_type) in
+        elems := v :: !elems; off := !off + sz
+      done; (VArray (List.rev !elems), !off - offset)
     | _ -> let bty = parse_field_bytes f.field_type endian data offset in (bty, size_of_type f.field_type)
-  and dispatch_variants info data base_offset env field_ends = let final_env = ref env in List.iter (fun (tag_name, cases) -> let tag_val = try List.assoc tag_name !final_env with Not_found -> VNull in List.iter (fun case -> let expected = eval_expr case.pattern [] (ref VNull) in if values_equal tag_val expected then let case_env, _, _ = parse_fields case.fields data base_offset base_offset !final_env field_ends in final_env := case_env) cases) info.variants; VObj !final_env
+  and dispatch_variants info data base_offset env field_ends =
+    let final_env = ref env in
+    List.iter (fun (tag_name, cases) ->
+      let tag_val = try List.assoc tag_name !final_env with Not_found -> VNull in
+      List.iter (fun case -> let expected = eval_expr case.pattern [] (ref VNull) in if values_equal tag_val expected then let case_env, _, _ = parse_fields case.fields data base_offset base_offset !final_env field_ends in final_env := case_env) cases) info.variants;
+    VObj !final_env
   in let env, _, _ = parse_fields schema.fields bytes 0 0 [] [] in env
