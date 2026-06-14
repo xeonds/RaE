@@ -4,3 +4,9 @@ parser.conflicts
 *.bin
 out*
 editors/vscode/rae-lsp
+
+# VitePress
+docs/node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+docs/.pnpm-store/

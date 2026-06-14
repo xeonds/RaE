@@ -1,6 +1,6 @@
-.PHONY: all build clean vsix
+.PHONY: all build clean vsix docs docs-install docs-dev docs-build docs-clean
 
-all: build vsix
+all: build vsix docs
 
 build:
 	dune build
@@ -13,6 +13,20 @@ vsix:
 
 install:
 	dune install
+
+docs: docs-install docs-build
+
+docs-install:
+	cd docs && pnpm install --frozen-lockfile || pnpm install
+
+docs-dev:
+	cd docs && pnpm run dev
+
+docs-build:
+	cd docs && pnpm run build
+
+docs-clean:
+	rm -rf docs/.vitepress/cache docs/.vitepress/dist docs/node_modules
 
 clean:
 	dune clean

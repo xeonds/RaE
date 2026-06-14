@@ -1,0 +1,13 @@
+{
+  "name": "rae",
+  "patterns": [
+    { "name": "keyword.control.rae", "match": "\\b(file|struct|enum|bitfield|template|variant|after|align|let|in|new|le|be|endian)\\b" },
+    { "name": "storage.type.rae", "match": "\\b(u8|u16|u32|u64|i8|i16|i32|i64|f32|f64|string|bytes|array)\\b" },
+    { "name": "support.function.rae", "match": "@\\w+" },
+    { "name": "constant.numeric.rae", "match": "\\b0x[0-9a-fA-F]+\\b|\\b\\d+\\b" },
+    { "name": "string.quoted.rae", "match": "\"[^\"]*\"" },
+    { "name": "comment.line.rae", "match": "//.*$" },
+    { "name": "comment.block.rae", "match": "/\\*[\\s\\S]*?\\*/" },
+    { "name": "variable.rae", "match": "\\.[a-zA-Z_][a-zA-Z0-9_]*" }
+  ]
+}
